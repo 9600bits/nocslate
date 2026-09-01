@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Home, Radar, Settings, Sun, Moon } from "lucide-react";
+import { Activity, Home, Radar, Settings, Sun, Moon, Boxes } from "lucide-react";
 import { fetchRules, fetchConfig, fetchPackets, fetchPacketDetail, uploadPcap } from "./api";
 import HomePage from "./components/HomePage.jsx";
 import ProbePage from "./components/ProbePage.jsx";
+import CabinetPage from "./components/CabinetPage.jsx";
 import Toolbar from "./components/Toolbar.jsx";
 import UploadZone from "./components/UploadZone.jsx";
 import PacketTable from "./components/PacketTable.jsx";
@@ -15,7 +16,7 @@ const BLANK_FILTERS = { proto: "", rule: "", q: "", hits_only: false };
 
 function routeFromHash() {
   const value = window.location.hash.replace(/^#\/?/, "");
-  return ["home", "capture", "probe"].includes(value) ? value : "home";
+  return ["home", "capture", "probe", "cabinets"].includes(value) ? value : "home";
 }
 
 export default function App() {
@@ -185,6 +186,9 @@ export default function App() {
           <button className={route === "probe" ? "nav-item on" : "nav-item"} onClick={() => navigate("probe")}>
             <Activity size={15} /> 网络探测
           </button>
+          <button className={route === "cabinets" ? "nav-item on" : "nav-item"} onClick={() => navigate("cabinets")}>
+            <Boxes size={15} /> 机柜台账
+          </button>
         </nav>
         <div className="header-actions">
           <button className="btn btn-ghost theme-toggle" title={theme === "dark" ? "切换明亮主题" : "切换暗色主题"}
@@ -203,6 +207,7 @@ export default function App() {
       {route === "probe" && (
         <ProbePage cfg={cfg} onNavigate={navigate} onOpenConfig={() => setConfigOpen(true)} />
       )}
+      {route === "cabinets" && <CabinetPage />}
       {route === "capture" && (
         !session ? (
           <UploadZone onFile={handleFile} uploading={uploading} error={uploadError} />

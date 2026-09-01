@@ -22,4 +22,7 @@ backend/.tmp-test.pcap
 *.pcap
 *.pcapng
 *.cap
+*.db
+*.db-wal
+*.db-shm
 .env

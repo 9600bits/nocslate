@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, config, parser, probes, report as report_mod, rules as rules_mod, sessions
+from . import ai, cabinets, config, parser, probes, report as report_mod, rules as rules_mod, sessions
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
@@ -41,6 +41,120 @@ class ConfigIn(BaseModel):
 class ModelScanIn(BaseModel):
     base_url: str
     api_key: str = ""
+
+
+# ---------- cabinets ----------
+
+@app.get("/api/cabinets/rooms")
+def cab_rooms():
+    return cabinets.store.list_rooms()
+
+
+@app.post("/api/cabinets/rooms")
+def cab_create_room(body: cabinets.RoomIn):
+    try:
+        return cabinets.store.create_room(body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/cabinets/rooms/{room_id}")
+def cab_delete_room(room_id: int):
+    cabinets.store.delete_room(room_id)
+    return {"ok": True}
+
+
+@app.get("/api/cabinets/rooms/{room_id}/cabinets")
+def cab_list(room_id: int):
+    return cabinets.store.list_cabinets(room_id)
+
+
+@app.post("/api/cabinets/rooms/{room_id}/cabinets")
+def cab_create(room_id: int, body: cabinets.CabinetIn):
+    try:
+        return cabinets.store.create_cabinet(room_id, body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.put("/api/cabinets/cabinets/{cabinet_id}")
+def cab_update(cabinet_id: int, body: cabinets.CabinetIn):
+    try:
+        return cabinets.store.update_cabinet(cabinet_id, body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/cabinets/cabinets/{cabinet_id}")
+def cab_delete(cabinet_id: int):
+    cabinets.store.delete_cabinet(cabinet_id)
+    return {"ok": True}
+
+
+@app.get("/api/cabinets/cabinets/{cabinet_id}/layout")
+def cab_layout(cabinet_id: int):
+    try:
+        return cabinets.store.cabinet_layout(cabinet_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/cabinets/devices")
+def cab_devices(cabinet_id: Optional[int] = None):
+    return cabinets.store.list_devices(cabinet_id)
+
+
+@app.post("/api/cabinets/devices")
+def cab_create_device(body: cabinets.DeviceIn, cabinet_id: Optional[int] = None):
+    try:
+        return cabinets.store.create_device(cabinet_id, body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.put("/api/cabinets/devices/{device_id}")
+def cab_update_device(device_id: int, body: cabinets.DeviceIn, cabinet_id: Optional[int] = None):
+    try:
+        return cabinets.store.update_device(device_id, body, cabinet_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/cabinets/devices/{device_id}")
+def cab_delete_device(device_id: int):
+    cabinets.store.delete_device(device_id)
+    return {"ok": True}
+
+
+@app.post("/api/cabinets/placement-check")
+def cab_placement_check(cabinet_id: int, body: cabinets.PlacementCheckIn):
+    return cabinets.store.check_placement(
+        cabinet_id, body.u_start, body.u_size, body.exclude_kind, body.exclude_id
+    )
+
+
+@app.get("/api/cabinets/capacity")
+def cab_capacity():
+    return cabinets.store.capacity()
+
+
+@app.get("/api/cabinets/reservations")
+def cab_reservations(cabinet_id: Optional[int] = None):
+    return cabinets.store.list_reservations(cabinet_id)
+
+
+@app.post("/api/cabinets/reservations")
+def cab_create_reservation(cabinet_id: int, body: cabinets.ReservationIn):
+    try:
+        return cabinets.store.create_reservation(cabinet_id, body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/cabinets/reservations/{reservation_id}")
+def cab_delete_reservation(reservation_id: int):
+    cabinets.store.delete_reservation(reservation_id)
+    return {"ok": True}
 
 
 def _upload_dir() -> Path:

@@ -129,3 +129,77 @@ export function streamProbe(body, handlers, signal) {
 export function streamProbeAnalyze(body, handlers, signal) {
   return streamEvents("/api/ai/analyze-probe", body, handlers, signal);
 }
+
+// ---------- cabinets ----------
+
+export function fetchRooms() {
+  return fetch("/api/cabinets/rooms").then(unwrap);
+}
+
+export function createRoom(data) {
+  return fetch("/api/cabinets/rooms", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function fetchCabinets(roomId) {
+  return fetch(`/api/cabinets/rooms/${roomId}/cabinets`).then(unwrap);
+}
+
+export function createCabinet(roomId, data) {
+  return fetch(`/api/cabinets/rooms/${roomId}/cabinets`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function updateCabinet(id, data) {
+  return fetch(`/api/cabinets/cabinets/${id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function deleteCabinet(id) {
+  return fetch(`/api/cabinets/cabinets/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+export function fetchCabinetLayout(id) {
+  return fetch(`/api/cabinets/cabinets/${id}/layout`).then(unwrap);
+}
+
+export function createDevice(data, cabinetId) {
+  const q = cabinetId ? `?cabinet_id=${cabinetId}` : "";
+  return fetch(`/api/cabinets/devices${q}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function updateDevice(id, data, cabinetId) {
+  const q = cabinetId ? `?cabinet_id=${cabinetId}` : "";
+  return fetch(`/api/cabinets/devices/${id}${q}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function deleteDevice(id) {
+  return fetch(`/api/cabinets/devices/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+export function fetchCapacity() {
+  return fetch("/api/cabinets/capacity").then(unwrap);
+}
+
+export function createReservation(data, cabinetId) {
+  return fetch(`/api/cabinets/reservations?cabinet_id=${cabinetId}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function deleteReservation(id) {
+  return fetch(`/api/cabinets/reservations/${id}`, { method: "DELETE" }).then(unwrap);
+}
