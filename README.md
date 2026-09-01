@@ -85,3 +85,7 @@ python -m pytest tests -q
 脚本会先执行 `npm run build`，再调用 PyInstaller 生成 `dist/PacketLens.exe`。前端静态资源已内嵌进 exe；目标机器不需要 Wireshark、Npcap、Python 或管理员权限。
 
 未签名 PyInstaller exe 可能被部分杀毒软件误报，这是常见现象；正式分发时可以做代码签名。
+
+## 许可证
+
+本项目使用 [GPL-3.0](./LICENSE) 授权发布。发行版二进制和源码都可通过 GitHub Releases 获取。
