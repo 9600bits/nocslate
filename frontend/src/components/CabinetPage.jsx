@@ -383,7 +383,7 @@ export default function CabinetPage() {
         <DeviceModal
           data={modal.data} layout={layout}
           onClose={() => setModal(null)}
-          onSave={(d, cid) => modal.data ? run(updateDevice, modal.data.id, d, cid) : run(createDevice, d, cid)}
+          onSave={(d) => modal.data ? run(updateDevice, modal.data.id, d, selectedCab) : run(createDevice, d, selectedCab)}
           busy={busy}
         />
       )}
