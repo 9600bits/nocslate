@@ -130,6 +130,32 @@ export function streamProbeAnalyze(body, handlers, signal) {
   return streamEvents("/api/ai/analyze-probe", body, handlers, signal);
 }
 
+export function streamExposure(body, handlers, signal) {
+  return streamEvents("/api/security/exposure/run", body, handlers, signal);
+}
+
+export function fetchOfflineExposureReport(body) {
+  return fetch("/api/offline-exposure-report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(unwrap);
+}
+
+export function streamExposureAnalyze(body, handlers, signal) {
+  return streamEvents("/api/ai/analyze-exposure", body, handlers, signal);
+}
+
+export function uploadConfigAudit(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  return fetch("/api/security/config-audit/upload", { method: "POST", body: fd }).then(unwrap);
+}
+
+export function streamConfigAuditAnalyze(body, handlers, signal) {
+  return streamEvents("/api/ai/analyze-config-audit", body, handlers, signal);
+}
+
 // ---------- cabinets ----------
 
 export function fetchRooms() {
@@ -163,6 +189,39 @@ export function updateCabinet(id, data) {
 
 export function deleteCabinet(id) {
   return fetch(`/api/cabinets/cabinets/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+export function duplicateCabinet(id, data) {
+  return fetch(`/api/cabinets/cabinets/${id}/duplicate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function fetchTemplates() {
+  return fetch("/api/cabinets/templates").then(unwrap);
+}
+
+export function saveTemplate(id, data) {
+  return fetch(`/api/cabinets/cabinets/${id}/template`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function applyTemplate(id, data) {
+  return fetch(`/api/cabinets/templates/${id}/apply`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function deleteTemplate(id) {
+  return fetch(`/api/cabinets/templates/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+export function compareCabinets(leftId, rightId) {
+  return fetch(`/api/cabinets/compare/${leftId}/${rightId}`).then(unwrap);
 }
 
 export function fetchCabinetLayout(id) {
@@ -202,4 +261,40 @@ export function createReservation(data, cabinetId) {
 
 export function deleteReservation(id) {
   return fetch(`/api/cabinets/reservations/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+// ---------- monitor ----------
+
+export function fetchMonitorTasks() {
+  return fetch("/api/monitor/tasks").then(unwrap);
+}
+
+export function createMonitorTask(data) {
+  return fetch("/api/monitor/tasks", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function updateMonitorTask(id, data) {
+  return fetch(`/api/monitor/tasks/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then(unwrap);
+}
+
+export function deleteMonitorTask(id) {
+  return fetch(`/api/monitor/tasks/${id}`, { method: "DELETE" }).then(unwrap);
+}
+
+export function runMonitorTask(id) {
+  return fetch(`/api/monitor/tasks/${id}/run`, { method: "POST" }).then(unwrap);
+}
+
+export function fetchMonitorRuns(id) {
+  return fetch(`/api/monitor/tasks/${id}/runs`).then(unwrap);
+}
+
+export function fetchMonitorDiff(id) {
+  return fetch(`/api/monitor/tasks/${id}/diff`).then(unwrap);
 }

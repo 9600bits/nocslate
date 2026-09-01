@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Boxes, Radar, Settings, ShieldCheck } from "lucide-react";
+import { Boxes, Radar, Settings, ShieldCheck } from "lucide-react";
 
 export default function HomePage({ onNavigate }) {
   const entries = [
@@ -11,18 +11,18 @@ export default function HomePage({ onNavigate }) {
       accent: "iris",
     },
     {
-      id: "probe",
-      icon: <Activity size={24} />,
-      title: "网络探测",
-      text: "批量检查 Ping、HTTP 状态和常用 TCP 端口的连通性。",
-      accent: "lake",
-    },
-    {
       id: "cabinets",
       icon: <Boxes size={24} />,
       title: "机柜台账",
       text: "管理机房、机柜、设备台账和 U 位占用，查看容量使用率。",
       accent: "gold",
+    },
+    {
+      id: "security",
+      icon: <ShieldCheck size={24} />,
+      title: "探测与安全",
+      text: "批量 Ping / HTTP / TCP 探测、暴露面资产发现和设备配置审计。",
+      accent: "lake",
     },
     {
       id: "config",

@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Boxes, ChevronLeft, Cpu, HardDrive, Network, Plus, Server, Trash2, Pencil,
+  Boxes, ChevronLeft, Cpu, GitCompare, HardDrive, Layers, Network, Plus,
+  Save, Server, Trash2, Pencil, Copy,
 } from "lucide-react";
 import {
   fetchCabinetLayout, fetchCabinets, fetchCapacity, fetchRooms,
   createRoom, createCabinet, updateCabinet, deleteCabinet,
+  duplicateCabinet, fetchTemplates, saveTemplate, applyTemplate, deleteTemplate,
+  compareCabinets,
   createDevice, updateDevice, deleteDevice,
   createReservation, deleteReservation,
 } from "../api.js";
@@ -146,6 +149,7 @@ export default function CabinetPage() {
   const [selectedCab, setSelectedCab] = useState(null);
   const [layout, setLayout] = useState(null);
   const [capacity, setCapacity] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
 
@@ -160,6 +164,7 @@ export default function CabinetPage() {
       if (!selectedRoom || !rs.find((r) => r.id === selectedRoom)) setSelectedRoom(rs[0]?.id ?? null);
     }).catch((e) => setError(String(e.message || e)));
     fetchCapacity().then(setCapacity).catch(() => {});
+    fetchTemplates().then((data) => setTemplates(data.templates || [])).catch(() => {});
   }, [version, selectedRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -210,6 +215,8 @@ export default function CabinetPage() {
                   <span className="cab-u">{cab.u_total}U</span>
                   <span className="grow" />
                   <span className="cab-actions" onClick={(e) => e.stopPropagation()}>
+                    <button className="icon-btn" title="复制机柜" aria-label="复制机柜"
+                            onClick={() => setModal({ type: "duplicate", data: cab })}><Copy size={12} /></button>
                     <button className="icon-btn" title="编辑机柜" aria-label="编辑机柜"
                             onClick={() => setModal({ type: "cabinet", data: cab })}><Pencil size={12} /></button>
                     <button className="icon-btn danger" title="删除机柜" aria-label="删除机柜"
@@ -259,6 +266,16 @@ export default function CabinetPage() {
                 <span className="grow" />
                 <button className="btn btn-ghost" onClick={() => setModal({ type: "reservation" })}>
                   <Plus size={13} /> 预留 U 位
+                </button>
+                <button className="btn btn-ghost" onClick={() => setModal({ type: "save-template" })}
+                        disabled={!selectedCab}>
+                  <Save size={13} /> 存为模板
+                </button>
+                <button className="btn btn-ghost" onClick={() => setModal({ type: "apply-template" })}>
+                  <Layers size={13} /> 模板创建
+                </button>
+                <button className="btn btn-ghost" onClick={() => setModal({ type: "compare" })}>
+                  <GitCompare size={13} /> A/B 对比
                 </button>
                 <button className="btn btn-primary" onClick={() => setModal({ type: "device" })}>
                   <Plus size={13} /> 添加设备
@@ -328,6 +345,38 @@ export default function CabinetPage() {
           onClose={() => setModal(null)}
           onSave={(d) => modal.data ? run(updateCabinet, modal.data.id, d) : run(createCabinet, selectedRoom, d)}
           busy={busy}
+        />
+      )}
+      {modal?.type === "duplicate" && (
+        <DuplicateModal
+          data={modal.data} rooms={rooms}
+          onClose={() => setModal(null)}
+          onSave={(newName, targetRoomId) => run(duplicateCabinet, modal.data.id, { new_name: newName, target_room_id: targetRoomId })}
+          busy={busy}
+        />
+      )}
+      {modal?.type === "save-template" && (
+        <SaveTemplateModal
+          data={modal.data || layout?.cabinet}
+          onClose={() => setModal(null)}
+          onSave={(d) => run(saveTemplate, selectedCab, d)}
+          busy={busy}
+        />
+      )}
+      {modal?.type === "apply-template" && (
+        <ApplyTemplateModal
+          templates={templates} rooms={rooms}
+          onClose={() => setModal(null)}
+          onSave={(id, d) => run(applyTemplate, id, d)}
+          onDelete={(id) => run(deleteTemplate, id)}
+          busy={busy}
+        />
+      )}
+      {modal?.type === "compare" && (
+        <CompareModal
+          cabinets={[...cabinets]} rooms={rooms} selectedRoom={selectedRoom}
+          selected={selectedCab}
+          onClose={() => setModal(null)}
         />
       )}
       {modal?.type === "device" && (
@@ -461,6 +510,165 @@ function ReservationModal({ layout, onClose, onSave, busy }) {
         <button className="btn btn-primary" disabled={busy || !uStart}
                 onClick={() => onSave({ u_start: +uStart, u_size: uSize, label: label.trim() || "预留", owner })}>预留</button>
       </div>
+    </Modal>
+  );
+}
+
+function DuplicateModal({ data, rooms, onClose, onSave, busy }) {
+  const [newName, setNewName] = useState(`${data?.name || ""}-copy`);
+  const [targetRoom, setTargetRoom] = useState(data?.room_id || rooms[0]?.id);
+  return (
+    <Modal title="复制机柜" onClose={onClose}>
+      <div className="modal-sub">
+        将复制机柜 <strong>{data?.name}</strong> 的全部设备和 U 位预留到新机柜。
+      </div>
+      <Field label="新机柜名称">
+        <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如：C-01-B" />
+      </Field>
+      <Field label="目标机房">
+        <select value={targetRoom} onChange={(e) => setTargetRoom(+e.target.value)}>
+          {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      </Field>
+      <div className="modal-foot">
+        <button className="btn btn-ghost" onClick={onClose}>取消</button>
+        <button className="btn btn-primary" disabled={busy || !newName.trim()}
+                onClick={() => onSave(newName.trim(), targetRoom)}>复制</button>
+      </div>
+    </Modal>
+  );
+}
+
+function SaveTemplateModal({ data, onClose, onSave, busy }) {
+  const [name, setName] = useState(`${data?.name || ""}-template`);
+  const [remark, setRemark] = useState("");
+  return (
+    <Modal title="保存机柜模板" onClose={onClose}>
+      <div className="modal-sub">
+        将保存 <strong>{data?.name}</strong> 的机柜规格、设备布局和 U 位预留。
+      </div>
+      <Field label="模板名称">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="如：核心接入标准柜" />
+      </Field>
+      <Field label="说明"><input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="选填" /></Field>
+      <div className="modal-foot">
+        <button className="btn btn-ghost" onClick={onClose}>取消</button>
+        <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={() => onSave({ name: name.trim(), remark })}>保存</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ApplyTemplateModal({ templates, rooms, onClose, onSave, onDelete, busy }) {
+  const [templateId, setTemplateId] = useState(templates[0]?.id || "");
+  const [roomId, setRoomId] = useState(rooms[0]?.id || "");
+  const [baseName, setBaseName] = useState("");
+  const [count, setCount] = useState(1);
+  const [startNumber, setStartNumber] = useState(1);
+  const selected = templates.find((item) => item.id === +templateId);
+  return (
+    <Modal title="模板批量创建" onClose={onClose}>
+      {templates.length === 0 ? (
+        <div className="modal-sub">暂无模板。先选择一个机柜，点击“存为模板”。</div>
+      ) : (
+        <>
+          <Field label="模板">
+            <select value={templateId} onChange={(e) => setTemplateId(+e.target.value)}>
+              {templates.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {item.u_total}U · {item.devices?.length || 0} 台设备
+                </option>
+              ))}
+            </select>
+          </Field>
+          {selected?.remark && <div className="modal-sub">{selected.remark}</div>}
+          <div className="modal-sub">冗余部署会保留布局与规格，管理 IP 将保持为空。</div>
+          <Field label="目标机房">
+            <select value={roomId} onChange={(e) => setRoomId(+e.target.value)}>
+              {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+            </select>
+          </Field>
+          <Field label="基础名称">
+            <input autoFocus value={baseName} onChange={(e) => setBaseName(e.target.value)} placeholder="如：C-01 或冗余柜" />
+          </Field>
+          <div className="form-row">
+            <Field label="创建数量"><input type="number" min={1} max={64} value={count}
+                    onChange={(e) => setCount(Math.max(1, Math.min(64, +e.target.value || 1)))} /></Field>
+            <Field label="起始编号"><input type="number" min={1} value={startNumber}
+                    onChange={(e) => setStartNumber(Math.max(1, +e.target.value || 1))} /></Field>
+          </div>
+          <div className="modal-sub">
+            {count > 1 && /^.*\d+$/.test(baseName)
+              ? `将按数字递增生成 ${count} 台机柜。`
+              : `将生成 ${baseName || "机柜"}-01 到 ${baseName || "机柜"}-${String(count).padStart(2, "0")}。`}
+          </div>
+          <div className="modal-foot">
+            <span className="grow" />
+            <button className="btn btn-ghost danger-text" disabled={busy || !templateId}
+                    onClick={() => { if (confirm("删除该模板？已创建的机柜不受影响。")) onDelete(+templateId); }}>删除模板</button>
+            <button className="btn btn-ghost" onClick={onClose}>取消</button>
+            <button className="btn btn-primary" disabled={busy || !templateId || !baseName.trim()}
+                    onClick={() => onSave(+templateId, {
+                      room_id: roomId, base_name: baseName.trim(), count, start_number: startNumber,
+                    })}>创建</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function CompareModal({ cabinets, selected, onClose }) {
+  const [leftId, setLeftId] = useState(selected || cabinets[0]?.id || "");
+  const [rightId, setRightId] = useState(cabinets[1]?.id || cabinets[0]?.id || "");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const runCompare = async () => {
+    if (!leftId || !rightId || leftId === rightId) return;
+    setBusy(true);
+    setError("");
+    try {
+      setResult(await compareCabinets(+leftId, +rightId));
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="A/B 冗余对比" onClose={onClose}>
+      <div className="form-row">
+        <Field label="基准机柜 A">
+          <select value={leftId} onChange={(e) => setLeftId(+e.target.value)}>
+            {cabinets.map((cab) => <option key={cab.id} value={cab.id}>{cab.name}</option>)}
+          </select>
+        </Field>
+        <Field label="对照机柜 B">
+          <select value={rightId} onChange={(e) => setRightId(+e.target.value)}>
+            {cabinets.map((cab) => <option key={cab.id} value={cab.id}>{cab.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <button className="btn btn-primary" onClick={runCompare} disabled={busy || leftId === rightId}>开始对比</button>
+      {error && <div className="ai-error">{error}</div>}
+      {result && (
+        <div className="compare-result">
+          <div className={`status-badge ${result.identical ? "st-ok" : "st-warn"}`}>
+            {result.identical ? "布局一致" : `发现 ${result.changes.length} 处差异`}
+          </div>
+          {result.changes.map((change, index) => (
+            <div key={index} className="diff-item">
+              <span className="mono-cell">{change.u}</span>
+              <span className={`status-badge ${change.side === "left_only" ? "st-warn" : "st-err"}`}>
+                {change.side === "left_only" ? "仅 A 有" : "仅 B 有"}
+              </span>
+              <span>{change.kind === "device" ? "设备" : "预留"}：{change.name}</span>
+            </div>
+          ))}
+          {result.identical && <div className="modal-sub">设备与 U 位预留一致，管理 IP 和运行状态不参与冗余对比。</div>}
+        </div>
+      )}
     </Modal>
   );
 }

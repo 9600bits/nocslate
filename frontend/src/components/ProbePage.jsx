@@ -1,8 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
-  Activity, ArrowLeft, Bot, Copy, Download, Play, Settings2, Square,
+  Activity, ArrowLeft, Bot, Copy, Download, Eye, History, Play, RefreshCw,
+  Save, Settings2, Square, Timer, Trash2,
 } from "lucide-react";
-import { fetchOfflineProbeReport, streamProbe, streamProbeAnalyze } from "../api";
+import {
+  createMonitorTask, deleteMonitorTask, fetchMonitorDiff, fetchMonitorRuns,
+  fetchMonitorTasks, fetchOfflineProbeReport, runMonitorTask, streamProbe,
+  streamProbeAnalyze, updateMonitorTask,
+} from "../api";
 import Markdown from "./Markdown.jsx";
 
 const DEFAULT_PORTS = [
@@ -119,7 +124,13 @@ function resultStatus(result) {
   return result.status;
 }
 
-export default function ProbePage({ cfg, onNavigate, onOpenConfig }) {
+function formatTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+export default function ProbePage({ cfg, onNavigate, onOpenConfig, embedded = false }) {
   const [probeType, setProbeType] = useState("ping");
   const [targetsText, setTargetsText] = useState("127.0.0.1\n192.168.1.1");
   const [portText, setPortText] = useState(DEFAULT_PORTS.join(", "));
@@ -144,6 +155,14 @@ export default function ProbePage({ cfg, onNavigate, onOpenConfig }) {
   const [offlineOutput, setOfflineOutput] = useState("");
   const [offlineError, setOfflineError] = useState("");
   const [offlineBusy, setOfflineBusy] = useState(false);
+  const [tasks, setTasks] = useState([]);
+  const [taskName, setTaskName] = useState("");
+  const [taskInterval, setTaskInterval] = useState(300);
+  const [expandedTask, setExpandedTask] = useState(null);
+  const [runs, setRuns] = useState([]);
+  const [diff, setDiff] = useState(null);
+  const [monitorBusy, setMonitorBusy] = useState(false);
+  const [monitorError, setMonitorError] = useState("");
   const probeAbort = useRef(null);
   const aiAbort = useRef(null);
 
@@ -277,6 +296,106 @@ export default function ProbePage({ cfg, onNavigate, onOpenConfig }) {
   };
 
   const stopAi = () => aiAbort.current?.abort();
+
+  const loadTasks = async () => {
+    try {
+      const data = await fetchMonitorTasks();
+      setTasks(data.tasks || []);
+      setMonitorError("");
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    }
+  };
+
+  React.useEffect(() => { loadTasks(); }, []);
+
+  const saveTask = async () => {
+    if (!taskName.trim() || !targets.length) return;
+    setMonitorBusy(true);
+    setMonitorError("");
+    try {
+      await createMonitorTask({
+        ...buildBody(),
+        name: taskName.trim(),
+        interval_seconds: Math.max(30, Math.trunc(taskInterval) || 30),
+        ping_count: Math.min(100, normalizePingCount(pingCount)),
+      });
+      setTaskName("");
+      await loadTasks();
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    } finally {
+      setMonitorBusy(false);
+    }
+  };
+
+  const runTask = async (id) => {
+    setMonitorBusy(true);
+    setMonitorError("");
+    try {
+      await runMonitorTask(id);
+      await loadTasks();
+      if (expandedTask === id) {
+        const [runData, diffData] = await Promise.all([
+          fetchMonitorRuns(id), fetchMonitorDiff(id),
+        ]);
+        setRuns(runData.runs || []);
+        setDiff(diffData);
+      }
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    } finally {
+      setMonitorBusy(false);
+    }
+  };
+
+  const toggleTask = async (task) => {
+    setMonitorBusy(true);
+    try {
+      await updateMonitorTask(task.id, { enabled: !task.enabled });
+      await loadTasks();
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    } finally {
+      setMonitorBusy(false);
+    }
+  };
+
+  const removeTask = async (id) => {
+    if (!confirm("确定删除该监控任务及其历史？")) return;
+    setMonitorBusy(true);
+    try {
+      await deleteMonitorTask(id);
+      if (expandedTask === id) setExpandedTask(null);
+      await loadTasks();
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    } finally {
+      setMonitorBusy(false);
+    }
+  };
+
+  const showHistory = async (id) => {
+    if (expandedTask === id) {
+      setExpandedTask(null);
+      setRuns([]);
+      setDiff(null);
+      return;
+    }
+    setExpandedTask(id);
+    setMonitorBusy(true);
+    try {
+      const [runData, diffData] = await Promise.all([
+        fetchMonitorRuns(id), fetchMonitorDiff(id),
+      ]);
+      setRuns(runData.runs || []);
+      setDiff(diffData);
+    } catch (err) {
+      setMonitorError(String(err.message || err));
+    } finally {
+      setMonitorBusy(false);
+    }
+  };
   const reportOutput = reportMode === "offline" ? offlineOutput : aiOutput;
   const reportError = reportMode === "offline" ? offlineError : aiError;
   const reportBusy = reportMode === "offline" ? offlineBusy : aiStreaming;
@@ -295,18 +414,20 @@ export default function ProbePage({ cfg, onNavigate, onOpenConfig }) {
 
   const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
 
-  return (
-    <main className="probe-page">
-      <div className="page-head">
-        <button className="btn btn-ghost" onClick={() => onNavigate("home")}>
-          <ArrowLeft size={15} /> 返回首页
-        </button>
-        <div className="page-title">
-          <Activity size={18} className="accent-lake" />
-          <h2>网络探测</h2>
+  const content = (
+    <>
+      {!embedded && (
+        <div className="page-head">
+          <button className="btn btn-ghost" onClick={() => onNavigate("home")}>
+            <ArrowLeft size={15} /> 返回首页
+          </button>
+          <div className="page-title">
+            <Activity size={18} className="accent-lake" />
+            <h2>网络探测</h2>
+          </div>
+          <span className="legal-note">仅用于你有权测试的网络</span>
         </div>
-        <span className="legal-note">仅用于你有权测试的网络</span>
-      </div>
+      )}
 
       <div className="probe-layout">
         <section className="probe-config">
@@ -570,6 +691,117 @@ export default function ProbePage({ cfg, onNavigate, onOpenConfig }) {
           </div>
         </section>
       </div>
-    </main>
+
+      <section className="monitor-panel" aria-label="定时探测监控">
+        <div className="monitor-head">
+          <Timer size={16} className="accent-gold" />
+          <h3>定时监控</h3>
+          <span className="grow" />
+          <button className="btn btn-ghost" onClick={loadTasks} aria-label="刷新任务列表">
+            <RefreshCw size={14} /> 刷新
+          </button>
+        </div>
+
+        <div className="monitor-create">
+          <input className="input" value={taskName} onChange={(e) => setTaskName(e.target.value)}
+                 placeholder="任务名称，如：核心交换巡检" aria-label="监控任务名称" />
+          <label className="compact-field interval-field">
+            <span>间隔（秒）</span>
+            <input className="input" type="number" min="30" max="86400" value={taskInterval}
+                   onChange={(e) => setTaskInterval(Number(e.target.value))} />
+          </label>
+          <button className="btn btn-primary" onClick={saveTask}
+                  disabled={monitorBusy || !taskName.trim() || !targets.length}>
+            <Save size={14} /> 保存当前配置
+          </button>
+        </div>
+        <div className="counter-note">任务会保存当前探测类型、目标、端口和高级设置；Ping 任务每次最多保存 100 次。</div>
+
+        {monitorError && <div className="ai-error">{monitorError}</div>}
+        {tasks.length === 0 ? (
+          <div className="probe-empty">暂无任务。配置好目标后保存即可自动巡检。</div>
+        ) : (
+          <div className="monitor-table-wrap">
+            <table className="monitor-table">
+              <thead>
+                <tr><th>任务</th><th>类型</th><th>间隔</th><th>状态</th><th>最近 / 下次</th><th></th></tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => (
+                  <React.Fragment key={task.id}>
+                    <tr>
+                      <td>{task.name}</td>
+                      <td className="mono-cell">{task.probe_type.toUpperCase()}</td>
+                      <td className="mono-cell">{task.interval_seconds}s</td>
+                      <td>
+                        <span className={`status-badge st-${task.enabled ? "ok" : "warn"}`}>
+                          {task.enabled ? "启用" : "暂停"}
+                        </span>
+                      </td>
+                      <td className="mono-cell">
+                        {task.last_status} · {formatTime(task.last_run_at)} / {formatTime(task.next_run_at)}
+                      </td>
+                      <td className="monitor-actions">
+                        <button className="btn btn-ghost" onClick={() => runTask(task.id)} disabled={monitorBusy}>
+                          <Play size={13} /> 执行
+                        </button>
+                        <button className="btn btn-ghost" onClick={() => showHistory(task.id)}
+                                aria-expanded={expandedTask === task.id}>
+                          <History size={13} /> 历史
+                        </button>
+                        <button className="btn btn-ghost" onClick={() => toggleTask(task)} disabled={monitorBusy}>
+                          {task.enabled ? "暂停" : "启用"}
+                        </button>
+                        <button className="icon-btn danger" onClick={() => removeTask(task.id)}
+                                title="删除任务" aria-label={`删除任务 ${task.name}`}>
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedTask === task.id && (
+                      <tr className="history-row">
+                        <td colSpan={6}>
+                          {diff?.has_previous && diff.changes.length > 0 && (
+                            <div className="diff-list">
+                              <div className="form-label">最近两次差异</div>
+                              {diff.changes.slice(0, 30).map((change, index) => (
+                                <div key={index} className="diff-item">
+                                  <span className="mono-cell">{change.key}</span>
+                                  <span className={`status-badge ${change.kind === "opened" ? "st-ok" : change.kind === "closed" ? "st-err" : "st-warn"}`}>
+                                    {change.kind === "opened" ? "新开放" : change.kind === "closed" ? "新关闭" : "状态变化"}
+                                  </span>
+                                  <span>{change.old?.status || change.old?.category || "无"} → {change.new?.status || change.new?.category || "无"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="run-list">
+                            {runs.map((run) => (
+                              <div key={run.id} className="run-item">
+                                <Eye size={13} />
+                                <span className="mono-cell">{formatTime(run.started_at)}</span>
+                                <span className={run.error_count ? "accent-coral" : "accent-lake"}>
+                                  {run.ok_count} 正常 / {run.error_count} 异常
+                                </span>
+                                <span>{run.trigger === "scheduled" ? "自动" : "手动"}</span>
+                                <span className="mono-cell">{(run.duration_ms / 1000).toFixed(1)}s</span>
+                              </div>
+                            ))}
+                            {runs.length === 0 && <span className="placeholder">暂无运行记录</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   );
+
+  if (embedded) return content;
+  return <main className="probe-page">{content}</main>;
 }

@@ -8,6 +8,8 @@ frontend/dist/
 
 build/
 dist/
+build-v*/
+dist-v*/
 dist-release/
 *.spec
 

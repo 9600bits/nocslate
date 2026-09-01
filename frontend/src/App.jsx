@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Home, Radar, Settings, Sun, Moon, Boxes } from "lucide-react";
+import { Home, Radar, Settings, Sun, Moon, Boxes, ShieldCheck } from "lucide-react";
 import { fetchRules, fetchConfig, fetchPackets, fetchPacketDetail, uploadPcap } from "./api";
 import HomePage from "./components/HomePage.jsx";
-import ProbePage from "./components/ProbePage.jsx";
+import SecurityOpsPage from "./components/SecurityOpsPage.jsx";
 import CabinetPage from "./components/CabinetPage.jsx";
 import Toolbar from "./components/Toolbar.jsx";
 import UploadZone from "./components/UploadZone.jsx";
@@ -16,7 +16,7 @@ const BLANK_FILTERS = { proto: "", rule: "", q: "", hits_only: false };
 
 function routeFromHash() {
   const value = window.location.hash.replace(/^#\/?/, "");
-  return ["home", "capture", "probe", "cabinets"].includes(value) ? value : "home";
+  return ["home", "capture", "probe", "cabinets", "security"].includes(value) ? value : "home";
 }
 
 export default function App() {
@@ -173,7 +173,7 @@ export default function App() {
           <div className="brand-icon"><Radar size={18} /></div>
           <div>
             <div className="brand-name">Packet Lens</div>
-            <div className="brand-sub">抓包分析 · 网络探测 · AI 解读</div>
+            <div className="brand-sub">抓包分析 · 探测与安全 · AI 解读</div>
           </div>
         </button>
         <nav className="main-nav" aria-label="主导航">
@@ -183,11 +183,12 @@ export default function App() {
           <button className={route === "capture" ? "nav-item on" : "nav-item"} onClick={() => navigate("capture")}>
             <Radar size={15} /> 抓包分析
           </button>
-          <button className={route === "probe" ? "nav-item on" : "nav-item"} onClick={() => navigate("probe")}>
-            <Activity size={15} /> 网络探测
-          </button>
           <button className={route === "cabinets" ? "nav-item on" : "nav-item"} onClick={() => navigate("cabinets")}>
             <Boxes size={15} /> 机柜台账
+          </button>
+          <button className={route === "probe" || route === "security" ? "nav-item on" : "nav-item"}
+                  onClick={() => navigate("security")}>
+            <ShieldCheck size={15} /> 探测与安全
           </button>
         </nav>
         <div className="header-actions">
@@ -204,10 +205,16 @@ export default function App() {
       </header>
 
       {route === "home" && <HomePage onNavigate={navigate} />}
-      {route === "probe" && (
-        <ProbePage cfg={cfg} onNavigate={navigate} onOpenConfig={() => setConfigOpen(true)} />
-      )}
       {route === "cabinets" && <CabinetPage />}
+      {(route === "probe" || route === "security") && (
+        <SecurityOpsPage
+          key={route === "security" ? "security" : "probe"}
+          cfg={cfg}
+          onNavigate={navigate}
+          onOpenConfig={() => setConfigOpen(true)}
+          initialTab={route === "security" ? "exposure" : "probe"}
+        />
+      )}
       {route === "capture" && (
         !session ? (
           <UploadZone onFile={handleFile} uploading={uploading} error={uploadError} />

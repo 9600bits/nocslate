@@ -25,6 +25,24 @@ PROBE_SYSTEM_PROMPT = (
     "不要编造探测结果里不存在的端口、状态码或主机。"
 )
 
+SECURITY_EXPOSURE_SYSTEM_PROMPT = (
+    "你是资深网络安全工程师，正在分析授权范围内的暴露面扫描结果。"
+    "请基于给出的资产、开放端口、服务指纹、HTTP 安全头和 TLS 证书信息，用中文按以下 Markdown 结构输出：\n"
+    "## 结论\n（概括资产存活情况、暴露面规模和主要风险）\n"
+    "## 风险\n（按优先级列出服务暴露、TLS、HTTP 安全头等风险，不提供攻击步骤）\n"
+    "## 建议\n（给出加固、访问控制、证书和服务运维建议）\n"
+    "不要编造未扫描的端口或资产，不要输出利用代码或凭据猜测方法。"
+)
+
+CONFIG_AUDIT_SYSTEM_PROMPT = (
+    "你是资深网络设备安全审计工程师，正在分析已经脱敏的 H3C、华为、ZTE 或锐捷配置摘要。"
+    "请只基于给出的离线审计发现和脱敏证据，用中文按以下 Markdown 结构输出：\n"
+    "## 结论\n（概括配置风险与设备类型适配要点）\n"
+    "## 风险\n（解释为什么这些配置会造成风险，按优先级排序）\n"
+    "## 建议\n（按设备厂商命令风格给出加固方向，不要要求用户提供密码，不要输出攻击步骤）\n"
+    "不要尝试恢复或猜测被脱敏的凭据，不要编造配置中不存在的内容。"
+)
+
 
 class AIConfigError(Exception):
     pass
@@ -93,6 +111,22 @@ def build_probe_context(probe_type: str, summary: dict, results: list[dict]) -> 
         "probe_type": probe_type,
         "summary": summary,
         "异常与代表性结果": sample,
+    }
+    return json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+
+
+def build_exposure_context(summary: dict, assets: list[dict],
+                           findings: list[dict]) -> str:
+    risky = [
+        item for item in findings
+        if str(item.get("severity", "")).lower() in {"critical", "high", "medium"}
+    ]
+    low = [item for item in findings if item not in risky]
+    context = {
+        "summary": summary,
+        "代表性资产": assets[:50],
+        "重点风险": risky[:50],
+        "低风险发现": low[:20],
     }
     return json.dumps(context, ensure_ascii=False, separators=(",", ":"))
 

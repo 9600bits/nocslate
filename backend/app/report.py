@@ -561,3 +561,77 @@ def build_probe_report(probe_type: str, summary: dict, results: list[dict]) -> s
         "HTTP 检查只记录状态和耗时，不保存响应正文。探测结果不能替代安全评估。",
     ])
     return "\n".join(lines) + "\n"
+
+
+def build_exposure_report(summary: dict, assets: list[dict], findings: list[dict]) -> str:
+    summary = summary or {}
+    risk_counts = {str(k): int(v) for k, v in (summary.get("risk_counts") or {}).items()}
+    lines = [
+        "# 暴露面与资产发现离线报告",
+        "",
+        "> 本报告由本地扫描结果生成，不依赖网络和 AI API。仅用于你有权测试的网络。",
+        "",
+        "## 结论",
+        "",
+    ]
+    if findings:
+        high = risk_counts.get("critical", 0) + risk_counts.get("high", 0)
+        lines.append(
+            f"本次发现 {len(assets)} 条资产记录、{int(summary.get('open_count', 0))} 个开放端口，"
+            f"归并出 {len(findings)} 项风险发现，其中高优先级 {high} 项。"
+        )
+    else:
+        lines.append("在授权端口范围内未发现命中的暴露面风险规则。")
+    lines.extend([
+        "",
+        "## 概览",
+        "",
+        "| 项目 | 值 |",
+        "|---|---|",
+        f"| 目标数 | {summary.get('targets_total', len(assets))} |",
+        f"| 存活主机 | {summary.get('hosts_alive', 0)} |",
+        f"| 检查端点 | {summary.get('endpoint_total', 0)} |",
+        f"| 开放端口 | {summary.get('open_count', 0)} |",
+        f"| 风险发现 | {len(findings)} |",
+        f"| 耗时 | {summary.get('duration_ms', '-')} ms |",
+        "",
+        "## 资产与端口",
+        "",
+        "| 目标 | 状态 | 开放端口 | 说明 |",
+        "|---|---|---|---|",
+    ])
+    for asset in assets[:50]:
+        lines.append(
+            "| {} | {} | {} | {} |".format(
+                _cell(asset.get("target", "")),
+                _cell(asset.get("status", "")),
+                _cell(", ".join(str(p) for p in asset.get("open_ports", [])) or "-"),
+                _cell(asset.get("detail", "")),
+            )
+        )
+    if len(assets) > 50:
+        lines.append(f"\n> 仅展示前 50 条资产记录，共 {len(assets)} 条。")
+
+    lines.extend(["", "## 风险发现", ""])
+    if not findings:
+        lines.append("未命中内置风险规则。")
+    for index, finding in enumerate(findings[:50], 1):
+        lines.extend([
+            f"### {index}. {finding.get('title', '风险发现')}",
+            "",
+            f"- 级别：{finding.get('severity', '-')}",
+            f"- 证据：{finding.get('evidence', '-')}",
+            f"- 建议：{finding.get('advice', '-')}",
+            "",
+        ])
+    if len(findings) > 50:
+        lines.append(f"> 仅展示前 50 条风险发现，共 {len(findings)} 条。")
+
+    lines.extend([
+        "## 局限性",
+        "",
+        "- TCP connect 扫描只能判断握手是否完成，不能证明服务版本完整。",
+        "- 服务识别基于常见端口、Banner、HTTP 响应头和 TLS 证书，不能替代专业安全评估。",
+        "- 未扫描的端口、UDP 服务和需要认证的业务风险不会被列出。",
+    ])
+    return "\n".join(lines) + "\n"

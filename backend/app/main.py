@@ -14,11 +14,27 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, cabinets, config, parser, probes, report as report_mod, rules as rules_mod, sessions
+from . import ai, cabinets, config, device_config, parser, probes, report as report_mod, rules as rules_mod, security, sessions
+from . import monitor as monitor_mod
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_CONFIG_AUDIT_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="Packet Lens", version="0.2.0")
+app = FastAPI(title="Packet Lens", version="0.6.0")
+monitor_scheduler: asyncio.Task | None = None
+
+
+@app.on_event("startup")
+async def start_monitor() -> None:
+    global monitor_scheduler
+    monitor_scheduler = asyncio.create_task(monitor_mod.scheduler_loop(monitor_mod.service))
+
+
+@app.on_event("shutdown")
+async def stop_monitor() -> None:
+    if monitor_scheduler is not None:
+        monitor_scheduler.cancel()
+        await asyncio.gather(monitor_scheduler, *monitor_mod.running_tasks, return_exceptions=True)
 
 
 class AnalyzeIn(BaseModel):
@@ -41,6 +57,10 @@ class ConfigIn(BaseModel):
 class ModelScanIn(BaseModel):
     base_url: str
     api_key: str = ""
+
+
+class ConfigAuditAnalyzeIn(BaseModel):
+    result: dict = {}
 
 
 # ---------- cabinets ----------
@@ -91,6 +111,14 @@ def cab_delete(cabinet_id: int):
     return {"ok": True}
 
 
+@app.post("/api/cabinets/cabinets/{cabinet_id}/duplicate")
+def cab_duplicate(cabinet_id: int, body: cabinets.DuplicateIn):
+    try:
+        return cabinets.store.duplicate_cabinet(cabinet_id, body.new_name, body.target_room_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.get("/api/cabinets/cabinets/{cabinet_id}/layout")
 def cab_layout(cabinet_id: int):
     try:
@@ -136,6 +164,99 @@ def cab_placement_check(cabinet_id: int, body: cabinets.PlacementCheckIn):
 @app.get("/api/cabinets/capacity")
 def cab_capacity():
     return cabinets.store.capacity()
+
+
+@app.get("/api/cabinets/templates")
+def cab_templates():
+    return {"templates": cabinets.store.list_templates()}
+
+
+@app.post("/api/cabinets/cabinets/{cabinet_id}/template")
+def cab_save_template(cabinet_id: int, body: cabinets.TemplateIn):
+    try:
+        return cabinets.store.save_template(cabinet_id, body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/cabinets/templates/{template_id}/apply")
+def cab_apply_template(template_id: int, body: cabinets.TemplateApplyIn):
+    try:
+        return {"cabinets": cabinets.store.apply_template(template_id, body)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/cabinets/templates/{template_id}")
+def cab_delete_template(template_id: int):
+    cabinets.store.delete_template(template_id)
+    return {"ok": True}
+
+
+@app.get("/api/cabinets/compare/{left_id}/{right_id}")
+def cab_compare(left_id: int, right_id: int):
+    try:
+        return cabinets.store.compare_cabinets(left_id, right_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+# ---------- monitor ----------
+
+@app.get("/api/monitor/tasks")
+def monitor_tasks():
+    return {"tasks": monitor_mod.service.list_tasks()}
+
+
+@app.post("/api/monitor/tasks")
+def monitor_create_task(body: monitor_mod.MonitorTaskIn):
+    try:
+        return monitor_mod.service.create_task(body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.patch("/api/monitor/tasks/{task_id}")
+def monitor_update_task(task_id: int, body: monitor_mod.MonitorUpdateIn):
+    try:
+        return monitor_mod.service.update_task(task_id, body)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.delete("/api/monitor/tasks/{task_id}")
+def monitor_delete_task(task_id: int):
+    monitor_mod.service.delete_task(task_id)
+    return {"ok": True}
+
+
+@app.post("/api/monitor/tasks/{task_id}/run")
+async def monitor_run_task(task_id: int):
+    try:
+        return await monitor_mod.service.run_task(task_id, "manual")
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/monitor/tasks/{task_id}/runs")
+def monitor_runs(task_id: int, limit: int = 50):
+    return {"runs": monitor_mod.service.list_runs(task_id, limit)}
+
+
+@app.get("/api/monitor/runs/{run_id}")
+def monitor_run(run_id: int):
+    run = monitor_mod.service.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, "运行记录不存在")
+    return run
+
+
+@app.get("/api/monitor/tasks/{task_id}/diff")
+def monitor_diff(task_id: int):
+    try:
+        return monitor_mod.service.diff_latest(task_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/api/cabinets/reservations")
@@ -321,6 +442,98 @@ def offline_probe_report(body: probes.ProbeAnalyzeIn):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"markdown": markdown, "generated_by": "local-rules"}
+
+
+@app.post("/api/security/exposure/run")
+async def exposure_run(body: security.ExposureRunIn):
+    async def event_stream():
+        try:
+            async for event in security.run_exposure(body):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'type': 'error', 'message': f'扫描失败: {exc}'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/offline-exposure-report")
+def offline_exposure_report(body: security.ExposureAnalyzeIn):
+    markdown = report_mod.build_exposure_report(body.summary, body.assets, body.findings)
+    return {"markdown": markdown, "generated_by": "local-rules"}
+
+
+@app.post("/api/ai/analyze-exposure")
+async def ai_analyze_exposure(body: security.ExposureAnalyzeIn):
+    context = ai.build_exposure_context(body.summary, body.assets, body.findings)
+    messages = [
+        {"role": "system", "content": ai.SECURITY_EXPOSURE_SYSTEM_PROMPT},
+        {"role": "user", "content": f"请分析以下暴露面扫描结果（JSON）：\n{context}"},
+    ]
+
+    async def event_stream():
+        try:
+            async for delta in ai.stream_chat(messages):
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        except (ai.AIConfigError, ai.AIUpstreamError) as exc:
+            yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'error': f'AI 调用失败: {exc}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/security/config-audit/upload")
+async def config_audit_upload(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "config.txt").suffix.lower()
+    allowed = {".txt", ".log", ".cfg", ".conf"}
+    if suffix not in allowed:
+        raise HTTPException(400, "支持上传 .txt、.log、.cfg 或 .conf 文本配置")
+    data = bytearray()
+    try:
+        while chunk := await file.read(1024 * 1024):
+            data.extend(chunk)
+            if len(data) > MAX_CONFIG_AUDIT_BYTES:
+                raise HTTPException(413, "文件过大（上限 20MB）")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"读取上传文件失败: {exc}") from exc
+    try:
+        return await asyncio.to_thread(
+            device_config.audit_upload, file.filename or "config.txt", bytes(data)
+        )
+    except device_config.ConfigAuditError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"配置审计失败: {exc}") from exc
+
+
+@app.post("/api/ai/analyze-config-audit")
+async def ai_analyze_config_audit(body: ConfigAuditAnalyzeIn):
+    context = device_config.build_exposure_context(body.result)
+    messages = [
+        {"role": "system", "content": ai.CONFIG_AUDIT_SYSTEM_PROMPT},
+        {"role": "user", "content": f"请增强解读以下配置审计结果（JSON）：\n{json.dumps(context, ensure_ascii=False)}"},
+    ]
+
+    async def event_stream():
+        try:
+            async for delta in ai.stream_chat(messages):
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        except (ai.AIConfigError, ai.AIUpstreamError) as exc:
+            yield f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'error': f'AI 调用失败: {exc}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/ai/models")

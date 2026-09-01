@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 import sys
 import threading
+import json
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -56,6 +58,23 @@ class PlacementCheckIn(BaseModel):
     u_size: int = Field(default=1, ge=1, le=100)
     exclude_kind: str = ""
     exclude_id: int = 0
+
+
+class DuplicateIn(BaseModel):
+    new_name: str = Field(min_length=1, max_length=64)
+    target_room_id: Optional[int] = None
+
+
+class TemplateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    remark: str = Field(default="", max_length=255)
+
+
+class TemplateApplyIn(BaseModel):
+    room_id: int
+    base_name: str = Field(min_length=1, max_length=64)
+    count: int = Field(default=1, ge=1, le=64)
+    start_number: int = Field(default=1, ge=1, le=9999)
 
 
 def db_path() -> Path:
@@ -128,6 +147,19 @@ class CabinetStore:
                 CREATE INDEX IF NOT EXISTS idx_cabinet_room ON cabinet(room_id);
                 CREATE INDEX IF NOT EXISTS idx_device_cabinet ON device(cabinet_id);
                 CREATE INDEX IF NOT EXISTS idx_reservation_cabinet ON reservation(cabinet_id);
+                CREATE TABLE IF NOT EXISTS cabinet_template (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    remark TEXT NOT NULL DEFAULT '',
+                    u_total INTEGER NOT NULL,
+                    power_limit_w REAL,
+                    weight_limit_kg REAL,
+                    status TEXT NOT NULL DEFAULT '在用',
+                    devices_json TEXT NOT NULL DEFAULT '[]',
+                    reservations_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                );
             """)
             self._conn.commit()
 
@@ -285,6 +317,171 @@ class CabinetStore:
 
     def delete_cabinet(self, cabinet_id: int) -> None:
         self.execute("DELETE FROM cabinet WHERE id=?", (cabinet_id,))
+
+    def duplicate_cabinet(self, cabinet_id: int, new_name: str, target_room_id: Optional[int] = None) -> dict:
+        """Copy a cabinet with its devices and reservations (offset to same U positions)."""
+        src = self.query_one("SELECT * FROM cabinet WHERE id=?", (cabinet_id,))
+        if src is None:
+            raise ValueError("源机柜不存在")
+        room_id = target_room_id if target_room_id is not None else src["room_id"]
+        if not self.query_one("SELECT id FROM room WHERE id=?", (room_id,)):
+            raise ValueError("目标机房不存在")
+        if self.query_one("SELECT id FROM cabinet WHERE room_id=? AND name=?", (room_id, new_name)):
+            raise ValueError(f"目标机房下机柜名称已存在：{new_name}")
+
+        new_id = self.execute(
+            "INSERT INTO cabinet(room_id, name, code, u_total, power_limit_w, weight_limit_kg, status, remark) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (room_id, new_name, src["code"], src["u_total"], src["power_limit_w"],
+             src["weight_limit_kg"], src["status"], src["remark"]),
+        )
+        devices = self.query(
+            "SELECT * FROM device WHERE cabinet_id=? AND status <> '已下架'", (cabinet_id,)
+        )
+        for dev in devices:
+            self.execute(
+                "INSERT INTO device(cabinet_id, name, u_start, u_size, dev_type, status, model, vendor, "
+                "mgmt_ip, power_w, weight_kg, remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], "备用",
+                 dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
+            )
+        reservations = self.query(
+            "SELECT * FROM reservation WHERE cabinet_id=?", (cabinet_id,)
+        )
+        for res in reservations:
+            self.execute(
+                "INSERT INTO reservation(cabinet_id, u_start, u_size, label, project, owner, remark) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (new_id, res["u_start"], res["u_size"], res["label"], res["project"],
+                 res["owner"], res["remark"]),
+            )
+        return self.query_one("SELECT * FROM cabinet WHERE id=?", (new_id,))
+
+    # ---------- templates & redundancy comparison ----------
+
+    def save_template(self, cabinet_id: int, data: TemplateIn) -> dict[str, Any]:
+        cab = self.query_one("SELECT * FROM cabinet WHERE id=?", (cabinet_id,))
+        if cab is None:
+            raise ValueError("机柜不存在")
+        if self.query_one("SELECT id FROM cabinet_template WHERE name=?", (data.name,)):
+            raise ValueError(f"模板名称已存在：{data.name}")
+        devices = self.query(
+            "SELECT name,u_start,u_size,dev_type,status,model,vendor,power_w,weight_kg,remark "
+            "FROM device WHERE cabinet_id=? AND status<>'已下架' ORDER BY u_start, id", (cabinet_id,)
+        )
+        reservations = self.query(
+            "SELECT u_start,u_size,label,project,owner,remark FROM reservation "
+            "WHERE cabinet_id=? ORDER BY u_start, id", (cabinet_id,)
+        )
+        template_id = self.execute(
+            "INSERT INTO cabinet_template(name,remark,u_total,power_limit_w,weight_limit_kg,status,"
+            "devices_json,reservations_json) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                data.name, data.remark, cab["u_total"], cab["power_limit_w"], cab["weight_limit_kg"],
+                cab["status"], json.dumps(devices, ensure_ascii=False),
+                json.dumps(reservations, ensure_ascii=False),
+            ),
+        )
+        return self.query_one("SELECT * FROM cabinet_template WHERE id=?", (template_id,))  # type: ignore[return-value]
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        rows = self.query("SELECT * FROM cabinet_template ORDER BY name")
+        for row in rows:
+            row["devices"] = json.loads(row.pop("devices_json"))
+            row["reservations"] = json.loads(row.pop("reservations_json"))
+        return rows
+
+    def delete_template(self, template_id: int) -> None:
+        self.execute("DELETE FROM cabinet_template WHERE id=?", (template_id,))
+
+    def _template_names(self, base_name: str, count: int, start_number: int) -> list[str]:
+        if count == 1:
+            return [base_name]
+        match = re.fullmatch(r"^(.*?)(\d+)$", base_name)
+        if not match:
+            return [f"{base_name}-{index:02d}" for index in range(start_number, start_number + count)]
+        prefix, number = match.groups()
+        width = len(number)
+        return [
+            f"{prefix}{str(start_number + offset).zfill(width)}"
+            for offset in range(count)
+        ]
+
+    def apply_template(self, template_id: int, data: TemplateApplyIn) -> list[dict[str, Any]]:
+        template = self.query_one("SELECT * FROM cabinet_template WHERE id=?", (template_id,))
+        if template is None:
+            raise ValueError("模板不存在")
+        if not self.query_one("SELECT id FROM room WHERE id=?", (data.room_id,)):
+            raise ValueError("目标机房不存在")
+        devices = json.loads(template["devices_json"])
+        reservations = json.loads(template["reservations_json"])
+        created: list[dict[str, Any]] = []
+        names = self._template_names(data.base_name.strip(), data.count, data.start_number)
+        for name in names:
+            if self.query_one("SELECT id FROM cabinet WHERE room_id=? AND name=?", (data.room_id, name)):
+                raise ValueError(f"该机房下机柜名称已存在：{name}")
+            cid = self.execute(
+                "INSERT INTO cabinet(room_id,name,code,u_total,power_limit_w,weight_limit_kg,status,remark) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (data.room_id, name, "", template["u_total"], template["power_limit_w"],
+                 template["weight_limit_kg"], template["status"], f"由模板 {template['name']} 创建"),
+            )
+            for dev in devices:
+                self.execute(
+                    "INSERT INTO device(cabinet_id,name,u_start,u_size,dev_type,status,model,vendor,"
+                    "mgmt_ip,power_w,weight_kg,remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (cid, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], dev["status"],
+                     dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
+                )
+            for res in reservations:
+                self.execute(
+                    "INSERT INTO reservation(cabinet_id,u_start,u_size,label,project,owner,remark) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (cid, res["u_start"], res["u_size"], res["label"], res["project"], res["owner"], res["remark"]),
+                )
+            created.append(self.query_one("SELECT * FROM cabinet WHERE id=?", (cid,)))  # type: ignore[arg-type]
+        return created
+
+    def compare_cabinets(self, left_id: int, right_id: int) -> dict[str, Any]:
+        left_layout = self.cabinet_layout(left_id)
+        right_layout = self.cabinet_layout(right_id)
+
+        def device_signature(dev: dict[str, Any]) -> tuple:
+            return (
+                dev.get("name", ""), dev.get("u_start"), dev.get("u_size"),
+                dev.get("dev_type", ""), dev.get("model", ""), dev.get("vendor", ""),
+                float(dev.get("power_w") or 0), float(dev.get("weight_kg") or 0),
+            )
+
+        def reservation_signature(res: dict[str, Any]) -> tuple:
+            return (
+                res.get("u_start"), res.get("u_size"), res.get("label", ""),
+                res.get("project", ""), res.get("owner", ""),
+            )
+
+        left_devices = {device_signature(dev): dev for dev in left_layout["devices"]}
+        right_devices = {device_signature(dev): dev for dev in right_layout["devices"]}
+        left_reservations = {reservation_signature(res): res for res in left_layout["reservations"]}
+        right_reservations = {reservation_signature(res): res for res in right_layout["reservations"]}
+        changes: list[dict[str, str]] = []
+        for key in sorted(set(left_devices) - set(right_devices), key=lambda item: (item[1] or 999, item[0])):
+            changes.append({"kind": "device", "side": "left_only", "name": key[0],
+                            "u": f"{key[1]}-{(key[1] or 0) + key[2] - 1}U"})
+        for key in sorted(set(right_devices) - set(left_devices), key=lambda item: (item[1] or 999, item[0])):
+            changes.append({"kind": "device", "side": "right_only", "name": key[0],
+                            "u": f"{key[1]}-{(key[1] or 0) + key[2] - 1}U"})
+        for key in sorted(set(left_reservations) - set(right_reservations), key=lambda item: item[0] or 0):
+            changes.append({"kind": "reservation", "side": "left_only", "name": key[2],
+                            "u": f"{key[0]}-{key[0] + key[1] - 1}U"})
+        for key in sorted(set(right_reservations) - set(left_reservations), key=lambda item: item[0] or 0):
+            changes.append({"kind": "reservation", "side": "right_only", "name": key[2],
+                            "u": f"{key[0]}-{key[0] + key[1] - 1}U"})
+        return {
+            "left": left_layout,
+            "right": right_layout,
+            "identical": not changes,
+            "changes": changes,
+        }
 
     # ---------- devices ----------
 
