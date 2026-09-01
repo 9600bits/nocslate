@@ -8,6 +8,7 @@ frontend/dist/
 
 build/
 dist/
+dist-release/
 *.spec
 
 backend/config.json
