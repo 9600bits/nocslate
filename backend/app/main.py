@@ -16,18 +16,25 @@ from pydantic import BaseModel
 
 from . import ai, cabinets, config, device_config, parser, probes, report as report_mod, rules as rules_mod, security, sessions
 from . import monitor as monitor_mod
+from .infra_api import router as infra_router
+from .local_auth import middleware as local_auth_middleware
+from . import server_ops
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_CONFIG_AUDIT_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="Packet Lens", version="0.6.0")
+app = FastAPI(title="Packet Lens", version="0.7.0")
+app.middleware("http")(local_auth_middleware)
+app.include_router(infra_router)
 monitor_scheduler: asyncio.Task | None = None
+inspection_scheduler: asyncio.Task | None = None
 
 
 @app.on_event("startup")
 async def start_monitor() -> None:
-    global monitor_scheduler
+    global monitor_scheduler, inspection_scheduler
     monitor_scheduler = asyncio.create_task(monitor_mod.scheduler_loop(monitor_mod.service))
+    inspection_scheduler = asyncio.create_task(server_ops.scheduler_loop())
 
 
 @app.on_event("shutdown")
@@ -35,6 +42,9 @@ async def stop_monitor() -> None:
     if monitor_scheduler is not None:
         monitor_scheduler.cancel()
         await asyncio.gather(monitor_scheduler, *monitor_mod.running_tasks, return_exceptions=True)
+    if inspection_scheduler is not None:
+        inspection_scheduler.cancel()
+        await asyncio.gather(inspection_scheduler, return_exceptions=True)
 
 
 class AnalyzeIn(BaseModel):
@@ -80,7 +90,10 @@ def cab_create_room(body: cabinets.RoomIn):
 
 @app.delete("/api/cabinets/rooms/{room_id}")
 def cab_delete_room(room_id: int):
-    cabinets.store.delete_room(room_id)
+    try:
+        cabinets.store.delete_room(room_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return {"ok": True}
 
 
@@ -107,7 +120,10 @@ def cab_update(cabinet_id: int, body: cabinets.CabinetIn):
 
 @app.delete("/api/cabinets/cabinets/{cabinet_id}")
 def cab_delete(cabinet_id: int):
-    cabinets.store.delete_cabinet(cabinet_id)
+    try:
+        cabinets.store.delete_cabinet(cabinet_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return {"ok": True}
 
 
@@ -128,8 +144,8 @@ def cab_layout(cabinet_id: int):
 
 
 @app.get("/api/cabinets/devices")
-def cab_devices(cabinet_id: Optional[int] = None):
-    return cabinets.store.list_devices(cabinet_id)
+def cab_devices(cabinet_id: Optional[int] = None, unracked_only: bool = False):
+    return cabinets.store.list_devices(cabinet_id, unracked_only)
 
 
 @app.post("/api/cabinets/devices")
@@ -152,6 +168,14 @@ def cab_update_device(device_id: int, body: cabinets.DeviceIn, cabinet_id: Optio
 def cab_delete_device(device_id: int):
     cabinets.store.delete_device(device_id)
     return {"ok": True}
+
+
+@app.post("/api/cabinets/devices/{device_id}/placement")
+def cab_place_device(device_id: int, body: cabinets.DevicePlacementIn):
+    try:
+        return cabinets.store.place_device(device_id, body.cabinet_id, body.u_start)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/cabinets/placement-check")
@@ -637,6 +661,8 @@ if _STATIC and (_STATIC / "assets").exists():
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa(full_path: str):
+    if full_path.startswith("api/"):
+        raise HTTPException(404, "接口不存在")
     if _STATIC is None:
         raise HTTPException(404, "前端资源未构建，请先执行 npm run build")
     candidate = (_STATIC / full_path).resolve()

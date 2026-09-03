@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sqlite3
 import sys
 import threading
 from datetime import datetime, timedelta, timezone
@@ -42,7 +44,19 @@ class MonitorUpdateIn(BaseModel):
 
 def db_path() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "monitor.db"
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+        target = base / "PacketLens" / "monitor.db"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        legacy = Path(sys.executable).resolve().parent / "monitor.db"
+        if not target.exists() and legacy.exists() and legacy.resolve() != target.resolve():
+            source = sqlite3.connect(str(legacy))
+            destination = sqlite3.connect(str(target))
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+                source.close()
+        return target
     return Path(__file__).resolve().parent.parent / "monitor.db"
 
 
@@ -122,8 +136,6 @@ class MonitorStore:
 
 
 def _connect(path: Path):
-    import sqlite3
-
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row

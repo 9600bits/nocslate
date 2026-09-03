@@ -7,7 +7,10 @@ import sys
 import threading
 import json
 import re
+import os
 from pathlib import Path
+from contextlib import contextmanager
+from collections.abc import Iterator
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -77,9 +80,29 @@ class TemplateApplyIn(BaseModel):
     start_number: int = Field(default=1, ge=1, le=9999)
 
 
+class DevicePlacementIn(BaseModel):
+    cabinet_id: Optional[int] = None
+    u_start: Optional[int] = Field(default=None, ge=1)
+
+
 def db_path() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "cabinets.db"
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+        target = base / "PacketLens" / "cabinets.db"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # v0.6 及更早版本把数据库放在 exe 旁边。首次升级时用 SQLite
+        # backup API 搬到用户数据目录，连同尚未 checkpoint 的 WAL 一并复制。
+        legacy = Path(sys.executable).resolve().parent / "cabinets.db"
+        if not target.exists() and legacy.exists() and legacy.resolve() != target.resolve():
+            source = sqlite3.connect(str(legacy))
+            destination = sqlite3.connect(str(target))
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+                source.close()
+        return target
     return Path(__file__).resolve().parent.parent / "cabinets.db"
 
 
@@ -87,8 +110,11 @@ class CabinetStore:
     """Thread-safe wrapper around one SQLite connection (WAL mode)."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(db_path(), check_same_thread=False)
+        self._lock = threading.RLock()
+        self._transaction_depth = 0
+        path = db_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -161,6 +187,11 @@ class CabinetStore:
                     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
                 );
             """)
+            # 修复旧版本删除机柜后留下的中间态：没有机柜的设备不能继续
+            # 保留 U 位，否则既无法展示，也无法正确重新上架。
+            self._conn.execute(
+                "UPDATE device SET u_start=NULL WHERE cabinet_id IS NULL AND u_start IS NOT NULL"
+            )
             self._conn.commit()
 
     def query(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -181,8 +212,37 @@ class CabinetStore:
     def execute(self, sql: str, params: tuple = ()) -> int:
         with self._lock:
             cur = self._conn.execute(sql, params)
-            self._conn.commit()
+            if self._transaction_depth == 0:
+                self._conn.commit()
             return int(cur.lastrowid or 0)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """让组合操作要么全部完成，要么完全不落库。支持嵌套调用。"""
+        with self._lock:
+            outermost = self._transaction_depth == 0
+            savepoint = f"cabinet_tx_{self._transaction_depth}"
+            if outermost:
+                self._conn.execute("BEGIN")
+            else:
+                self._conn.execute(f"SAVEPOINT {savepoint}")
+            self._transaction_depth += 1
+            try:
+                yield
+            except BaseException:
+                self._transaction_depth -= 1
+                if outermost:
+                    self._conn.rollback()
+                else:
+                    self._conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    self._conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+            else:
+                self._transaction_depth -= 1
+                if outermost:
+                    self._conn.commit()
+                else:
+                    self._conn.execute(f"RELEASE SAVEPOINT {savepoint}")
 
     def close(self) -> None:
         with self._lock:
@@ -271,7 +331,16 @@ class CabinetStore:
         return self.query_one("SELECT * FROM room WHERE id=?", (rid,))
 
     def delete_room(self, room_id: int) -> None:
-        self.execute("DELETE FROM room WHERE id=?", (room_id,))
+        if not self.query_one("SELECT id FROM room WHERE id=?", (room_id,)):
+            raise ValueError("机房不存在")
+        with self.transaction():
+            self.execute(
+                "UPDATE device SET cabinet_id=NULL, u_start=NULL, "
+                "updated_at=datetime('now','localtime') "
+                "WHERE cabinet_id IN (SELECT id FROM cabinet WHERE room_id=?)",
+                (room_id,),
+            )
+            self.execute("DELETE FROM room WHERE id=?", (room_id,))
 
     # ---------- cabinets ----------
 
@@ -307,6 +376,19 @@ class CabinetStore:
         )
         if dup:
             raise ValueError(f"该机房下机柜名称已存在：{data.name}")
+        highest = self.scalar(
+            "SELECT MAX(top_u) FROM ("
+            "SELECT u_start + u_size - 1 AS top_u FROM device "
+            "WHERE cabinet_id=? AND u_start IS NOT NULL AND status<>'已下架' "
+            "UNION ALL SELECT u_start + u_size - 1 FROM reservation WHERE cabinet_id=?"
+            ")",
+            (cabinet_id, cabinet_id),
+            0,
+        )
+        if highest and data.u_total < int(highest):
+            raise ValueError(
+                f"机柜内已有设备或预留占到 {highest}U，无法将总高度改为 {data.u_total}U"
+            )
         self.execute(
             "UPDATE cabinet SET name=?, code=?, u_total=?, power_limit_w=?, weight_limit_kg=?, "
             "status=?, remark=? WHERE id=?",
@@ -316,7 +398,15 @@ class CabinetStore:
         return self.query_one("SELECT * FROM cabinet WHERE id=?", (cabinet_id,))
 
     def delete_cabinet(self, cabinet_id: int) -> None:
-        self.execute("DELETE FROM cabinet WHERE id=?", (cabinet_id,))
+        if not self.query_one("SELECT id FROM cabinet WHERE id=?", (cabinet_id,)):
+            raise ValueError("机柜不存在")
+        with self.transaction():
+            self.execute(
+                "UPDATE device SET cabinet_id=NULL, u_start=NULL, "
+                "updated_at=datetime('now','localtime') WHERE cabinet_id=?",
+                (cabinet_id,),
+            )
+            self.execute("DELETE FROM cabinet WHERE id=?", (cabinet_id,))
 
     def duplicate_cabinet(self, cabinet_id: int, new_name: str, target_room_id: Optional[int] = None) -> dict:
         """Copy a cabinet with its devices and reservations (offset to same U positions)."""
@@ -329,32 +419,33 @@ class CabinetStore:
         if self.query_one("SELECT id FROM cabinet WHERE room_id=? AND name=?", (room_id, new_name)):
             raise ValueError(f"目标机房下机柜名称已存在：{new_name}")
 
-        new_id = self.execute(
-            "INSERT INTO cabinet(room_id, name, code, u_total, power_limit_w, weight_limit_kg, status, remark) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (room_id, new_name, src["code"], src["u_total"], src["power_limit_w"],
-             src["weight_limit_kg"], src["status"], src["remark"]),
-        )
         devices = self.query(
             "SELECT * FROM device WHERE cabinet_id=? AND status <> '已下架'", (cabinet_id,)
         )
-        for dev in devices:
-            self.execute(
-                "INSERT INTO device(cabinet_id, name, u_start, u_size, dev_type, status, model, vendor, "
-                "mgmt_ip, power_w, weight_kg, remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (new_id, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], "备用",
-                 dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
-            )
         reservations = self.query(
             "SELECT * FROM reservation WHERE cabinet_id=?", (cabinet_id,)
         )
-        for res in reservations:
-            self.execute(
-                "INSERT INTO reservation(cabinet_id, u_start, u_size, label, project, owner, remark) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (new_id, res["u_start"], res["u_size"], res["label"], res["project"],
-                 res["owner"], res["remark"]),
+        with self.transaction():
+            new_id = self.execute(
+                "INSERT INTO cabinet(room_id, name, code, u_total, power_limit_w, weight_limit_kg, status, remark) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (room_id, new_name, src["code"], src["u_total"], src["power_limit_w"],
+                 src["weight_limit_kg"], src["status"], src["remark"]),
             )
+            for dev in devices:
+                self.execute(
+                    "INSERT INTO device(cabinet_id, name, u_start, u_size, dev_type, status, model, vendor, "
+                    "mgmt_ip, power_w, weight_kg, remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (new_id, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], "备用",
+                     dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
+                )
+            for res in reservations:
+                self.execute(
+                    "INSERT INTO reservation(cabinet_id, u_start, u_size, label, project, owner, remark) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (new_id, res["u_start"], res["u_size"], res["label"], res["project"],
+                     res["owner"], res["remark"]),
+                )
         return self.query_one("SELECT * FROM cabinet WHERE id=?", (new_id,))
 
     # ---------- templates & redundancy comparison ----------
@@ -417,29 +508,37 @@ class CabinetStore:
         reservations = json.loads(template["reservations_json"])
         created: list[dict[str, Any]] = []
         names = self._template_names(data.base_name.strip(), data.count, data.start_number)
-        for name in names:
-            if self.query_one("SELECT id FROM cabinet WHERE room_id=? AND name=?", (data.room_id, name)):
-                raise ValueError(f"该机房下机柜名称已存在：{name}")
-            cid = self.execute(
-                "INSERT INTO cabinet(room_id,name,code,u_total,power_limit_w,weight_limit_kg,status,remark) "
-                "VALUES(?,?,?,?,?,?,?,?)",
-                (data.room_id, name, "", template["u_total"], template["power_limit_w"],
-                 template["weight_limit_kg"], template["status"], f"由模板 {template['name']} 创建"),
-            )
-            for dev in devices:
-                self.execute(
-                    "INSERT INTO device(cabinet_id,name,u_start,u_size,dev_type,status,model,vendor,"
-                    "mgmt_ip,power_w,weight_kg,remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (cid, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], dev["status"],
-                     dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
+        duplicates = [
+            name for name in names
+            if self.query_one("SELECT id FROM cabinet WHERE room_id=? AND name=?", (data.room_id, name))
+        ]
+        if duplicates:
+            raise ValueError(f"该机房下机柜名称已存在：{'、'.join(duplicates)}")
+
+        with self.transaction():
+            for name in names:
+                cid = self.execute(
+                    "INSERT INTO cabinet(room_id,name,code,u_total,power_limit_w,weight_limit_kg,status,remark) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
+                    (data.room_id, name, "", template["u_total"], template["power_limit_w"],
+                     template["weight_limit_kg"], template["status"], f"由模板 {template['name']} 创建"),
                 )
-            for res in reservations:
-                self.execute(
-                    "INSERT INTO reservation(cabinet_id,u_start,u_size,label,project,owner,remark) "
-                    "VALUES(?,?,?,?,?,?,?)",
-                    (cid, res["u_start"], res["u_size"], res["label"], res["project"], res["owner"], res["remark"]),
-                )
-            created.append(self.query_one("SELECT * FROM cabinet WHERE id=?", (cid,)))  # type: ignore[arg-type]
+                for dev in devices:
+                    self.execute(
+                        "INSERT INTO device(cabinet_id,name,u_start,u_size,dev_type,status,model,vendor,"
+                        "mgmt_ip,power_w,weight_kg,remark) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (cid, dev["name"], dev["u_start"], dev["u_size"], dev["dev_type"], dev["status"],
+                         dev["model"], dev["vendor"], "", dev["power_w"], dev["weight_kg"], dev["remark"]),
+                    )
+                for res in reservations:
+                    self.execute(
+                        "INSERT INTO reservation(cabinet_id,u_start,u_size,label,project,owner,remark) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (cid, res["u_start"], res["u_size"], res["label"], res["project"], res["owner"], res["remark"]),
+                    )
+                created_item = self.query_one("SELECT * FROM cabinet WHERE id=?", (cid,))
+                if created_item is not None:
+                    created.append(created_item)
         return created
 
     def compare_cabinets(self, left_id: int, right_id: int) -> dict[str, Any]:
@@ -485,17 +584,23 @@ class CabinetStore:
 
     # ---------- devices ----------
 
-    def list_devices(self, cabinet_id: Optional[int] = None) -> list[dict]:
+    def list_devices(
+        self, cabinet_id: Optional[int] = None, unracked_only: bool = False
+    ) -> list[dict]:
         sql = "SELECT * FROM device"
         params: list = []
-        if cabinet_id is not None:
+        if unracked_only:
+            sql += " WHERE cabinet_id IS NULL OR u_start IS NULL"
+        elif cabinet_id is not None:
             sql += " WHERE cabinet_id=?"
             params.append(cabinet_id)
-        sql += " ORDER BY cabinet_id, u_start"
+        sql += " ORDER BY cabinet_id, u_start, name"
         return self.query(sql, tuple(params))
 
     def create_device(self, cabinet_id: Optional[int], data: DeviceIn) -> dict:
-        if cabinet_id is not None:
+        if cabinet_id is None:
+            data.u_start = None
+        if cabinet_id is not None and data.status != "已下架":
             check = self.check_placement(cabinet_id, data.u_start, data.u_size)
             if not check["ok"]:
                 raise ValueError(check.get("message", "U 位冲突"))
@@ -512,21 +617,49 @@ class CabinetStore:
         if old is None:
             raise ValueError("设备不存在")
         target = cabinet_id if cabinet_id is not None else old["cabinet_id"]
-        if target is not None:
-            check = self.check_placement(target, data.u_start, data.u_size, "device", device_id)
+        target_u_start = data.u_start if target is not None else None
+        if target is not None and data.status != "已下架":
+            check = self.check_placement(target, target_u_start, data.u_size, "device", device_id)
             if not check["ok"]:
                 raise ValueError(check.get("message", "U 位冲突"))
         self.execute(
             "UPDATE device SET cabinet_id=?, name=?, u_start=?, u_size=?, dev_type=?, status=?, "
             "model=?, vendor=?, mgmt_ip=?, power_w=?, weight_kg=?, remark=?, "
             "updated_at=datetime('now','localtime') WHERE id=?",
-            (target, data.name, data.u_start, data.u_size, data.dev_type, data.status,
+            (target, data.name, target_u_start, data.u_size, data.dev_type, data.status,
              data.model, data.vendor, data.mgmt_ip, data.power_w, data.weight_kg, data.remark, device_id),
         )
         return self.query_one("SELECT * FROM device WHERE id=?", (device_id,))
 
     def delete_device(self, device_id: int) -> None:
         self.execute("DELETE FROM device WHERE id=?", (device_id,))
+
+    def place_device(
+        self, device_id: int, cabinet_id: Optional[int], u_start: Optional[int]
+    ) -> dict:
+        device = self.query_one("SELECT * FROM device WHERE id=?", (device_id,))
+        if device is None:
+            raise ValueError("设备不存在")
+        if cabinet_id is None:
+            self.execute(
+                "UPDATE device SET cabinet_id=NULL, u_start=NULL, "
+                "updated_at=datetime('now','localtime') WHERE id=?",
+                (device_id,),
+            )
+            return self.query_one("SELECT * FROM device WHERE id=?", (device_id,))  # type: ignore[return-value]
+        if device["status"] == "已下架":
+            raise ValueError("设备状态为已下架，请先改为在用、备用或维护中")
+        if u_start is None:
+            raise ValueError("上架时必须指定起始 U 位")
+        check = self.check_placement(cabinet_id, u_start, int(device["u_size"]), "device", device_id)
+        if not check["ok"]:
+            raise ValueError(check.get("message", "U 位冲突"))
+        self.execute(
+            "UPDATE device SET cabinet_id=?, u_start=?, "
+            "updated_at=datetime('now','localtime') WHERE id=?",
+            (cabinet_id, u_start, device_id),
+        )
+        return self.query_one("SELECT * FROM device WHERE id=?", (device_id,))  # type: ignore[return-value]
 
     # ---------- reservations ----------
 
@@ -591,8 +724,8 @@ class CabinetStore:
                 "u_total": u_total,
                 "u_used": u_used,
                 "u_reserved": reserved,
-                "u_free": u_total - u_used - reserved,
-                "u_pct": round(u_used / u_total * 100, 1) if u_total else 0,
+                "u_free": max(0, u_total - u_used - reserved),
+                "u_pct": round((u_used + reserved) / u_total * 100, 1) if u_total else 0,
                 "power_limit_w": cab["power_limit_w"],
                 "power_used": dev.get("power_used", 0),
                 "power_pct": (
