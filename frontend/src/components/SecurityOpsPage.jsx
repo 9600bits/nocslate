@@ -9,10 +9,11 @@ const WORK_TABS = [
   { id: "config", label: "设备配置审计", icon: <ShieldAlert size={15} /> },
 ];
 
-export default function SecurityOpsPage({ cfg, onNavigate, onOpenConfig, initialTab = "probe" }) {
-  const [workTab, setWorkTab] = useState(WORK_TABS.some((tab) => tab.id === initialTab)
+export default function SecurityOpsPage({ cfg, onNavigate, onOpenConfig, initialTab = "probe", securityOnly = false }) {
+  const tabs = securityOnly ? WORK_TABS.filter((tab) => tab.id !== "probe") : WORK_TABS;
+  const [workTab, setWorkTab] = useState(tabs.some((tab) => tab.id === initialTab)
     ? initialTab
-    : "probe");
+    : tabs[0].id);
 
   return (
     <main className="security-page security-ops-page">
@@ -27,8 +28,8 @@ export default function SecurityOpsPage({ cfg, onNavigate, onOpenConfig, initial
         <span className="legal-note">仅用于你有权测试的网络</span>
       </div>
 
-      <div className="seg tabs page-tabs three" role="tablist" aria-label="探测与安全功能">
-        {WORK_TABS.map((tab) => (
+      <div className={`seg tabs page-tabs ${tabs.length === 3 ? "three" : ""}`} role="tablist" aria-label="安全功能">
+        {tabs.map((tab) => (
           <button key={tab.id} role="tab" aria-selected={workTab === tab.id}
                   className={workTab === tab.id ? "on" : ""}
                   onClick={() => setWorkTab(tab.id)}>
