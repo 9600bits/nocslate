@@ -407,7 +407,7 @@ export default function ProbePage({ cfg, onNavigate, onOpenConfig, embedded = fa
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `packet-lens-probe-${probeType}-${stamp}.md`;
+    link.download = `nocslate-probe-${probeType}-${stamp}.md`;
     link.click();
     URL.revokeObjectURL(url);
   };

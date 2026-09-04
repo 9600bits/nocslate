@@ -96,7 +96,7 @@ export default function AiPanel({ session, cfg, selection, lastFlow, onOpenConfi
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `packet-lens-report-${stamp}.md`;
+    link.download = `nocslate-report-${stamp}.md`;
     link.click();
     URL.revokeObjectURL(url);
   };

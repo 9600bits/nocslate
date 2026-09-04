@@ -10,8 +10,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 
-SESSION_COOKIE = "packet_lens_session"
-CSRF_COOKIE = "packet_lens_csrf"
+SESSION_COOKIE = "nocslate_session"
+CSRF_COOKIE = "nocslate_csrf"
 
 
 def enable(app) -> str:
@@ -53,7 +53,7 @@ async def middleware(request: Request, call_next):
     if request.url.path.startswith("/api/"):
         session = request.cookies.get(SESSION_COOKIE, "")
         if not secrets.compare_digest(session, getattr(app.state, "session_token", "!")):
-            return JSONResponse({"detail": "本次 Packet Lens 会话已失效，请从程序重新打开页面"}, status_code=401)
+            return JSONResponse({"detail": "本次 NOCSlate 会话已失效，请从程序重新打开页面"}, status_code=401)
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             csrf = request.headers.get("x-csrf-token", "")
             if not _loopback_origin(request) or not secrets.compare_digest(
@@ -65,4 +65,3 @@ async def middleware(request: Request, call_next):
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
     return response
-

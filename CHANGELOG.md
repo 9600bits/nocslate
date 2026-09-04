@@ -1,6 +1,24 @@
-# Packet Lens 版本记录
+# NOCSlate 版本记录
 
 本文件记录正式发布版本的重要变化。日期采用北京时间对应的发布日期。
+
+## v0.8.0 - 2026-09-04
+
+这是仅包含品牌更名的版本，不增加或移除产品功能。
+
+### 更名
+
+- 产品名称由 Packet Lens 更改为 NOCSlate。
+- Windows 可执行文件由 `PacketLens.exe` 更改为 `NOCSlate.exe`。
+- 更新界面标题、API 元数据、报告标题、导出文件名和 AI 助手身份。
+- GitHub 仓库更名为 `9600bits/nocslate`，旧地址由 GitHub 自动重定向。
+- 默认数据目录更改为 `%APPDATA%\NOCSlate`；首次启动自动复制旧目录数据且保留原文件。
+- 新增 `NOCSLATE_DATA_DIR` 环境变量，同时继续兼容 `PACKET_LENS_DATA_DIR`。
+
+### 兼容性
+
+- 保留旧主题设置读取，升级后继续沿用用户选择的明暗主题。
+- 数据库结构、接口路径和现有功能保持不变。
 
 ## v0.7.0 - 2026-09-03
 

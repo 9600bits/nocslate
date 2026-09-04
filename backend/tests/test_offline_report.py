@@ -24,7 +24,7 @@ def test_offline_report_overview(session_id):
     data = resp.json()
     assert data["generated_by"] == "local-rules"
     markdown = data["markdown"]
-    assert "# Packet Lens 离线诊断报告" in markdown
+    assert "# NOCSlate 离线诊断报告" in markdown
     assert "本地规则引擎生成" in markdown
     assert "TCP RST / RST+ACK" in markdown
     assert "TCP 重传" in markdown

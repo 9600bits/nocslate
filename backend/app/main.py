@@ -23,7 +23,7 @@ from . import server_ops
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_CONFIG_AUDIT_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="Packet Lens", version="0.7.0")
+app = FastAPI(title="NOCSlate", version="0.8.0")
 app.middleware("http")(local_auth_middleware)
 app.include_router(infra_router)
 monitor_scheduler: asyncio.Task | None = None
@@ -303,7 +303,7 @@ def cab_delete_reservation(reservation_id: int):
 
 
 def _upload_dir() -> Path:
-    d = Path(tempfile.gettempdir()) / "packet_lens_uploads"
+    d = Path(tempfile.gettempdir()) / "nocslate_uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

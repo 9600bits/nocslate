@@ -6,7 +6,10 @@ import base64
 import ctypes
 import os
 import re
+import shutil
+import sqlite3
 import sys
+import uuid
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -30,13 +33,68 @@ _PRIVATE_IP = re.compile(
 )
 
 
+def _migrate_legacy_data_dir(base: Path, target: Path) -> Path:
+    legacy = base / "PacketLens"
+    if target.exists() or not legacy.is_dir():
+        return target
+
+    staging = base / f".NOCSlate-migrating-{uuid.uuid4().hex}"
+    try:
+        staging.mkdir(parents=True)
+        for source in legacy.iterdir():
+            if source.name.endswith(("-wal", "-shm")):
+                continue
+            destination = staging / source.name
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            elif source.suffix.lower() == ".db":
+                source_db = sqlite3.connect(str(source))
+                target_db = sqlite3.connect(str(destination))
+                try:
+                    source_db.backup(target_db)
+                finally:
+                    target_db.close()
+                    source_db.close()
+                if source.name == "ops.db":
+                    migrated_db = sqlite3.connect(str(destination))
+                    try:
+                        has_documents = migrated_db.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_document'"
+                        ).fetchone()
+                        if has_documents:
+                            rows = migrated_db.execute(
+                                "SELECT id,file_path FROM knowledge_document WHERE file_path<>''"
+                            ).fetchall()
+                            for document_id, file_path in rows:
+                                try:
+                                    relative = Path(file_path).relative_to(legacy)
+                                except ValueError:
+                                    continue
+                                migrated_db.execute(
+                                    "UPDATE knowledge_document SET file_path=? WHERE id=?",
+                                    (str(target / relative), document_id),
+                                )
+                        migrated_db.commit()
+                    finally:
+                        migrated_db.close()
+            else:
+                shutil.copy2(source, destination)
+        # Rename within the same parent so the completed copy becomes visible
+        # as one operation on Windows as well as POSIX.
+        os.rename(staging, target)
+        return target
+    except (OSError, sqlite3.Error, shutil.Error):
+        shutil.rmtree(staging, ignore_errors=True)
+        return legacy
+
+
 def app_data_dir() -> Path:
-    override = os.environ.get("PACKET_LENS_DATA_DIR")
+    override = os.environ.get("NOCSLATE_DATA_DIR") or os.environ.get("PACKET_LENS_DATA_DIR")
     if override:
         root = Path(override).expanduser().resolve()
     else:
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        root = base / "PacketLens"
+        root = _migrate_legacy_data_dir(base, base / "NOCSlate")
     root.mkdir(parents=True, exist_ok=True)
     (root / "knowledge").mkdir(exist_ok=True)
     (root / "logs").mkdir(exist_ok=True)
@@ -103,7 +161,7 @@ def _dpapi(value: bytes, protect: bool) -> bytes:
     flags = 0x01  # CRYPTPROTECT_UI_FORBIDDEN
     if protect:
         ok = crypt32.CryptProtectData(
-            ctypes.byref(in_blob), "PacketLens", None, None, None, flags, ctypes.byref(out_blob)
+            ctypes.byref(in_blob), "NOCSlate", None, None, None, flags, ctypes.byref(out_blob)
         )
     else:
         ok = crypt32.CryptUnprotectData(
@@ -159,7 +217,7 @@ def write_windows_credential(target: str, username: str, password: str) -> None:
     credential.CredentialBlobSize = len(blob)
     credential.CredentialBlob = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
     credential.Persist = 2  # CRED_PERSIST_LOCAL_MACHINE
-    credential.Comment = "Packet Lens RDP"
+    credential.Comment = "NOCSlate RDP"
     if not ctypes.windll.advapi32.CredWriteW(ctypes.byref(credential), 0):
         raise SecretProtectionError(f"写入 Windows 凭据失败: {ctypes.get_last_error()}")
 

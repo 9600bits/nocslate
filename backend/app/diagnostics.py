@@ -159,7 +159,7 @@ def _tls(host: str, port: int) -> dict[str, Any]:
 def _http(url: str) -> dict[str, Any]:
     started = time.monotonic()
     with httpx.Client(timeout=8, follow_redirects=True, verify=True) as client:
-        response = client.get(url, headers={"User-Agent": "PacketLens/0.7"})
+        response = client.get(url, headers={"User-Agent": "NOCSlate/0.8"})
     return {"ok": response.status_code < 500, "status_code": response.status_code,
             "final_url": str(response.url), "latency_ms": round((time.monotonic() - started) * 1000, 1),
             "server": response.headers.get("server", "")}
@@ -212,4 +212,3 @@ def run_plan(plan_id: int, emit: Callable[[dict[str, Any]], None] | None = None,
         (status, utc_now(), json.dumps(timeline, ensure_ascii=False), summary, run_id),
     )
     return get_run(run_id, ops_store)
-

@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0) {
 & $Python -m PyInstaller `
     --noconfirm `
     --onefile `
-    --name PacketLens `
+    --name NOCSlate `
     --add-data "$FrontendDist;static" `
     --collect-all scapy `
     (Join-Path $Root "backend\run.py")
@@ -35,4 +35,4 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 打包失败" }
 
 Write-Host ""
-Write-Host "打包完成: $(Join-Path $Root "dist\PacketLens.exe")"
+Write-Host "打包完成: $(Join-Path $Root "dist\NOCSlate.exe")"

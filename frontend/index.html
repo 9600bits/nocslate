@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <title>Packet Lens - 本地运维工作台</title>
+    <title>NOCSlate - 本地网络运维与安全工作台</title>
     <script>
       (function () {
-        var theme = localStorage.getItem("packet-lens-theme") || "light";
+        var theme = localStorage.getItem("nocslate-theme") || localStorage.getItem("packet-lens-theme") || "light";
         document.documentElement.dataset.theme = theme;
       })();
     </script>

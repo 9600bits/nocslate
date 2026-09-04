@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
 import sys
 import threading
@@ -15,6 +14,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 from . import probes
+from .platform_security import app_data_dir
 
 MAX_SAVED_RESULTS = 1000
 
@@ -44,8 +44,7 @@ class MonitorUpdateIn(BaseModel):
 
 def db_path() -> Path:
     if getattr(sys, "frozen", False):
-        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        target = base / "PacketLens" / "monitor.db"
+        target = app_data_dir() / "monitor.db"
         target.parent.mkdir(parents=True, exist_ok=True)
         legacy = Path(sys.executable).resolve().parent / "monitor.db"
         if not target.exists() and legacy.exists() and legacy.resolve() != target.resolve():

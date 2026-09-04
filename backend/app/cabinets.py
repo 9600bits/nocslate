@@ -7,13 +7,14 @@ import sys
 import threading
 import json
 import re
-import os
 from pathlib import Path
 from contextlib import contextmanager
 from collections.abc import Iterator
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+from .platform_security import app_data_dir
 
 
 class RoomIn(BaseModel):
@@ -87,8 +88,7 @@ class DevicePlacementIn(BaseModel):
 
 def db_path() -> Path:
     if getattr(sys, "frozen", False):
-        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
-        target = base / "PacketLens" / "cabinets.db"
+        target = app_data_dir() / "cabinets.db"
         target.parent.mkdir(parents=True, exist_ok=True)
 
         # v0.6 及更早版本把数据库放在 exe 旁边。首次升级时用 SQLite

@@ -243,7 +243,7 @@ def test_migration_clears_orphan_u_start(store):
 def test_frozen_db_path_migrates_legacy_database(tmp_path, monkeypatch):
     exe_dir = tmp_path / "release"
     exe_dir.mkdir()
-    executable = exe_dir / "PacketLens.exe"
+    executable = exe_dir / "NOCSlate.exe"
     executable.touch()
     legacy = exe_dir / "cabinets.db"
     conn = sqlite3.connect(legacy)
@@ -258,7 +258,7 @@ def test_frozen_db_path_migrates_legacy_database(tmp_path, monkeypatch):
     monkeypatch.setattr("app.cabinets.sys.executable", str(executable))
 
     migrated = db_path()
-    assert migrated == appdata / "PacketLens" / "cabinets.db"
+    assert migrated == appdata / "NOCSlate" / "cabinets.db"
     copied = sqlite3.connect(migrated)
     try:
         assert copied.execute("SELECT value FROM marker").fetchone()[0] == "legacy"

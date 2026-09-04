@@ -1,18 +1,18 @@
-# Packet Lens
+# NOCSlate
 
-[![Release](https://img.shields.io/github/v/release/9600bits/packet-lens?display_name=tag&sort=semver)](https://github.com/9600bits/packet-lens/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-2563eb)](https://github.com/9600bits/packet-lens/releases/latest)
-[![License](https://img.shields.io/github/license/9600bits/packet-lens)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/9600bits/nocslate?display_name=tag&sort=semver)](https://github.com/9600bits/nocslate/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-2563eb)](https://github.com/9600bits/nocslate/releases/latest)
+[![License](https://img.shields.io/github/license/9600bits/nocslate)](./LICENSE)
 
-Packet Lens 是一套面向个人运维场景的本地网络与基础设施工具。它把抓包分析、网络探测、机柜与服务器台账、安全审计、IP/VLAN 规划、故障诊断和本地知识检索放在同一个工作台中。
+NOCSlate 是一套面向个人运维场景的本地网络运维与安全工具。它把抓包分析、网络探测、机柜与服务器台账、安全审计、IP/VLAN 规划、故障诊断和本地知识检索放在同一个工作台中。
 
 应用默认使用浅色专业运维界面，以 Windows 单文件 EXE 运行。除主动启用的 AI 请求和用户发起的网络操作外，业务数据保存在本机。
 
-> 当前版本：`v0.7.0`。本项目不包含 Kubernetes 功能，也没有保留 K8s 隐藏入口或依赖。
+> 当前版本：`v0.8.0`。本版本只完成 Packet Lens 到 NOCSlate 的品牌更名，不包含新功能。
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/9600bits/packet-lens/releases/latest) 下载 `PacketLens.exe`。
+1. 从 [GitHub Releases](https://github.com/9600bits/nocslate/releases/latest) 下载 `NOCSlate.exe`。
 2. 双击运行，程序会自动打开本机浏览器。
 3. 默认访问地址为 `http://127.0.0.1:8321`。
 
@@ -21,8 +21,8 @@ Packet Lens 是一套面向个人运维场景的本地网络与基础设施工�
 常用启动参数：
 
 ```powershell
-.\PacketLens.exe --port 9000
-.\PacketLens.exe --host 127.0.0.1 --port 9000 --no-browser
+.\NOCSlate.exe --port 9000
+.\NOCSlate.exe --host 127.0.0.1 --port 9000 --no-browser
 ```
 
 ## 功能概览
@@ -82,7 +82,7 @@ AI 配置统一从界面右上角的设置按钮进入，不再提供重复的�
 
 ## 本地数据与安全
 
-运行数据位于 `%APPDATA%\PacketLens`：
+运行数据位于 `%APPDATA%\NOCSlate`。首次从旧版升级时，程序会复制 `%APPDATA%\PacketLens` 中的既有数据，原目录不会删除：
 
 | 路径 | 内容 |
 | --- | --- |
@@ -155,15 +155,15 @@ npm run build
 脚本会先构建 React 前端，再通过 PyInstaller 生成：
 
 ```text
-dist\PacketLens.exe
+dist\NOCSlate.exe
 ```
 
 前端静态资源会嵌入 EXE。未签名的 PyInstaller 程序可能被部分安全软件提示，请从本仓库 Release 下载并核对发行页提供的 SHA-256。
 
 ## 版本记录
 
-完整变更参见 [CHANGELOG.md](./CHANGELOG.md)。最新稳定版和 Windows 可执行文件参见 [GitHub Releases](https://github.com/9600bits/packet-lens/releases)。
+完整变更参见 [CHANGELOG.md](./CHANGELOG.md)。最新稳定版和 Windows 可执行文件参见 [GitHub Releases](https://github.com/9600bits/nocslate/releases)。
 
 ## 许可证
 
-Packet Lens 使用 [GPL-3.0](./LICENSE) 许可发布。
+NOCSlate 使用 [GPL-3.0](./LICENSE) 许可发布。

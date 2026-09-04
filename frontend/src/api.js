@@ -15,7 +15,7 @@ function fetch(input, init = {}) {
   const method = String(init.method || "GET").toUpperCase();
   const headers = new Headers(init.headers || {});
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-    const csrf = readCookie("packet_lens_csrf");
+    const csrf = readCookie("nocslate_csrf");
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
   return nativeFetch(input, { credentials: "same-origin", ...init, headers });

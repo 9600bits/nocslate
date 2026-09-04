@@ -180,7 +180,7 @@ async def stream_assistant(preview_id: str, confirmed: bool, conversation_id: in
         (conversation_id, "user", preview["query"], "[]", utc_now()),
     )
     system = (
-        "你是 Packet Lens 本地基础设施助手。只根据给定知识片段回答，使用中文，给出可操作建议。"
+        "你是 NOCSlate 本地基础设施助手。只根据给定知识片段回答，使用中文，给出可操作建议。"
         "事实必须使用 [来源 N] 标注；资料不足时明确说明，不编造主机、端口或配置状态。"
     )
     user = f"问题：{preview['query']}\n\n可用知识：\n{preview['context'] or '没有检索到相关资料'}"

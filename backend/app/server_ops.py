@@ -153,12 +153,12 @@ def connect_ssh(connection_id: int, trust_host_key: bool = False,
         if jump_client:
             jump_client.close()
         raise
-    client._packet_lens_jump_client = jump_client  # retained until close
+    client._nocslate_jump_client = jump_client  # retained until close
     return client
 
 
 def close_ssh(client) -> None:
-    jump = getattr(client, "_packet_lens_jump_client", None)
+    jump = getattr(client, "_nocslate_jump_client", None)
     client.close()
     if jump:
         jump.close()

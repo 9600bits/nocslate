@@ -511,7 +511,7 @@ export default function SecurityPage({
               error={reportError}
               output={reportOutput}
               onCopy={() => navigator.clipboard?.writeText(reportOutput)}
-              onDownload={() => downloadMarkdown(reportOutput, "packet-lens-exposure")}
+              onDownload={() => downloadMarkdown(reportOutput, "nocslate-exposure")}
             />
           </div>
         </div>
@@ -609,7 +609,7 @@ export default function SecurityPage({
                 <button className="btn btn-ghost btn-icon-only" disabled={!audit}
                         onClick={() => downloadMarkdown(
                           auditReportMode === "offline" ? audit.report : auditAiOutput,
-                          "packet-lens-config-audit",
+                          "nocslate-config-audit",
                         )} title="下载报告" aria-label="下载报告">
                   <Download size={15} />
                 </button>

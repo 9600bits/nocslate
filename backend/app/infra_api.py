@@ -274,7 +274,7 @@ def connection_launch(connection_id: int):
         f"username:s:{username}",
         f"prompt for credentials:i:{0 if saved_password else 1}",
     ]
-    fd, temp_name = tempfile.mkstemp(prefix="packet-lens-", suffix=".rdp")
+    fd, temp_name = tempfile.mkstemp(prefix="nocslate-", suffix=".rdp")
     os.close(fd)
     path = Path(temp_name)
     path.write_text("\r\n".join(lines), encoding="utf-8")

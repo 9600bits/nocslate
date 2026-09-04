@@ -87,7 +87,7 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("packet-lens-theme", theme);
+    localStorage.setItem("nocslate-theme", theme);
   }, [theme]);
 
   useEffect(() => {
@@ -218,7 +218,7 @@ export default function App() {
         <button className="brand brand-button" onClick={() => navigate("home")} title="返回首页">
           <div className="brand-icon"><Radar size={18} /></div>
           <div>
-            <div className="brand-name">Packet Lens</div>
+            <div className="brand-name">NOCSlate</div>
             <div className="brand-sub">本地运维工作台 · 网络 · 资产 · 安全</div>
           </div>
         </button>

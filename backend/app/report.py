@@ -319,7 +319,7 @@ def build_report(entry: dict, scope: str, packet_nos: list[int] | None = None,
     protocol_text = "；".join(f"{name} {count}" for name, count in protocols.items()) or "无"
 
     lines = [
-        "# Packet Lens 离线诊断报告",
+        "# NOCSlate 离线诊断报告",
         "",
         "> 本报告由本地规则引擎生成，不依赖网络和 AI API。",
         "",
@@ -381,7 +381,7 @@ def build_report(entry: dict, scope: str, packet_nos: list[int] | None = None,
         "- 从最严重的命中开始，逐个还原连接的完整生命周期。",
         "- 对照目标机器的服务日志、系统日志和防火墙日志交叉验证。",
         "- 在客户端与服务端同时抓包，确认异常发生在哪一段路径。",
-        "- 使用 Packet Lens 的网络探测页复核端口、HTTP 状态和链路延迟。",
+        "- 使用 NOCSlate 的网络探测页复核端口、HTTP 状态和链路延迟。",
         "- 重新抓包时保留更长时间窗口，避免只看到问题片段。",
         "",
         "## 局限性",
@@ -506,7 +506,7 @@ def build_probe_report(probe_type: str, summary: dict, results: list[dict]) -> s
     good = [r for r in results if r not in bad]
 
     lines = [
-        "# Packet Lens 网络探测离线报告",
+        "# NOCSlate 网络探测离线报告",
         "",
         "> 本报告由本地探测结果生成，不依赖网络和 AI API。",
         "",

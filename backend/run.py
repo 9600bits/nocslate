@@ -16,7 +16,7 @@ from app import config
 
 def main() -> None:
     multiprocessing.freeze_support()
-    ap = argparse.ArgumentParser(description="Packet Lens 抓包分析工具")
+    ap = argparse.ArgumentParser(description="NOCSlate 本地网络运维与安全工作台")
     ap.add_argument("--port", type=int, default=8321)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
@@ -30,7 +30,7 @@ def main() -> None:
     boot_url = f"{url}/?token={quote(launch_token)}"
     if not args.no_browser:
         threading.Timer(1.2, webbrowser.open, args=(boot_url,)).start()
-    print(f"Packet Lens 运行于 {url} （Ctrl+C 退出）")
+    print(f"NOCSlate 运行于 {url} （Ctrl+C 退出）")
     print(f"本次安全访问地址：{boot_url}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
