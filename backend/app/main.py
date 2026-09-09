@@ -23,7 +23,7 @@ from . import server_ops
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MAX_CONFIG_AUDIT_BYTES = 20 * 1024 * 1024
 
-app = FastAPI(title="NOCSlate", version="0.8.0")
+app = FastAPI(title="NOCSlate", version="0.8.1")
 app.middleware("http")(local_auth_middleware)
 app.include_router(infra_router)
 monitor_scheduler: asyncio.Task | None = None
